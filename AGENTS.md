@@ -83,9 +83,11 @@ Set in `.env` (copy `env.example`):
 ## Features
 
 - **Main Menu** — macOS-standard menu bar (App, Edit) for copy/paste shortcuts
-- **History** — Persistent storage of past requests/results (up to 100 items)
+- **History** — Persistent storage of past requests/results (up to 100 items), now stores full prompts and model info
 - **Customizable Hotkey** — Configurable in Settings → General
 - **Model Override** — Model can be set via Settings (overrides .env)
+- **Test Connection** — Built-in API connectivity test in Settings → API & Model
+- **Enhanced Debug Logging** — API key/URL validation and request tracing for troubleshooting
 
 ## Known Limitations / Next Steps
 
@@ -93,3 +95,4 @@ Set in `.env` (copy `env.example`):
 - [ ] Launch at login (LaunchAgent)
 - [ ] Package as `.app` bundle
 - [ ] Some sandboxed/Electron apps may not expose text via AX API (clipboard fallback handles these)
+- [ ] Enhanced model selection with caching and search

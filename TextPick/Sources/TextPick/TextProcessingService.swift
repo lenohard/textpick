@@ -15,14 +15,17 @@ actor TextProcessingService {
 
     var apiKey: String {
         // UserDefaults takes priority; fall back to env var
-        UserDefaults.standard.string(forKey: "textpick.apiKey")?.nilIfEmpty
+        // Strip whitespace from pasted keys
+        let key = UserDefaults.standard.string(forKey: "textpick.apiKey")?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
             ?? ProcessInfo.processInfo.environment["AI_GATEWAY_API_KEY"]
             ?? ""
+        return key
     }
     var baseURL: String {
-        UserDefaults.standard.string(forKey: "textpick.apiURL")?.nilIfEmpty
+        let url = UserDefaults.standard.string(forKey: "textpick.apiURL")?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
             ?? ProcessInfo.processInfo.environment["TEXTPICK_API_URL"]
             ?? "https://ai-gateway.vercel.sh/v1"
+        return url.hasSuffix("/") ? String(url.dropLast()) : url  // remove trailing slash
     }
     var model: String {
         // UserDefaults (Settings UI) takes priority over env var
@@ -55,10 +58,14 @@ actor TextProcessingService {
     // MARK: - API Call (OpenAI-compatible)
 
     private func callAPI(system: String, user: String) async throws -> String {
-        guard !apiKey.isEmpty else {
+        let key = apiKey
+        let url_base = baseURL
+        let mdl = model
+        print("[TextPick] API key length=\(key.count) prefix='\(key.prefix(6))...' url=\(url_base) model=\(mdl)")
+        guard !key.isEmpty else {
             throw APIError.missingAPIKey
         }
-        guard let url = URL(string: "\(baseURL)/chat/completions") else {
+        guard let url = URL(string: "\(url_base)/chat/completions") else {
             throw APIError.invalidURL
         }
 
@@ -77,11 +84,19 @@ actor TextProcessingService {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        let authHeader = "Bearer \(key)"
+        request.setValue(authHeader, forHTTPHeaderField: "Authorization")
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         request.timeoutInterval = 30
+        print("[TextPick] Auth header set: Bearer \(key.prefix(6))... (total \(authHeader.count) chars)")
+        print("[TextPick] Request headers: \(request.allHTTPHeaderFields ?? [:])")
+        print("[TextPick] POST \(url.absoluteString) model=\(mdl)")
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        // Use ephemeral session with auth in config to prevent header stripping
+        let config = URLSessionConfiguration.ephemeral
+        config.httpAdditionalHeaders = ["Authorization": authHeader]
+        let session = URLSession(configuration: config)
+        let (data, response) = try await session.data(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse else {
             throw APIError.invalidResponse
@@ -111,6 +126,20 @@ actor TextProcessingService {
         }
         var provider: String {
             String(id.split(separator: "/").first ?? Substring(id))
+        }
+    }
+
+    /// Lightweight test: hits /v1/models to verify key + connectivity.
+    func testConnection() async -> (ok: Bool, message: String) {
+        let key = apiKey
+        guard !key.isEmpty else {
+            return (false, "API key is empty — paste it in Settings → API & Model")
+        }
+        do {
+            let models = try await fetchModels()
+            return (true, "✓ Connected — \(models.count) models available (key prefix: \(key.prefix(6))…)")
+        } catch {
+            return (false, error.localizedDescription)
         }
     }
 

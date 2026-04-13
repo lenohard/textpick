@@ -71,7 +71,7 @@ struct HistoryRow: View {
                     .foregroundStyle(.tertiary)
             }
             
-            Text(item.sourceText)
+            Text(item.fullPrompt)
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)

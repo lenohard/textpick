@@ -336,6 +336,9 @@ struct APIAndModelTab: View {
     @State private var customModel  = ""
     @State private var useCustom    = false
     @State private var showKey      = false
+    @State private var testStatus: String? = nil
+    @State private var testOK: Bool = false
+    @State private var isTesting = false
 
     private var displayedModels: [TextProcessingService.ModelInfo] {
         guard !searchText.isEmpty else { return fetchedModels }
@@ -349,39 +352,27 @@ struct APIAndModelTab: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("API Key").font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
                 HStack(spacing: 6) {
-                    ZStack(alignment: .leading) {
-                        // Always a TextField so paste (⌘V) works
+                    if showKey {
                         TextField("Paste your API key…", text: $apiKey)
                             .textFieldStyle(.roundedBorder)
                             .font(.system(size: 12, design: .monospaced))
-                            .opacity(showKey ? 1 : 0)
-
-                        if !showKey {
-                            TextField("Paste your API key…", text: $apiKey)
-                                .textFieldStyle(.roundedBorder)
-                                .font(.system(size: 12, design: .monospaced))
-                                .foregroundColor(.clear)  // invisible text, visible cursor
-                                .overlay(
-                                    HStack {
-                                        Text(apiKey.isEmpty ? "Paste your API key…" :
-                                             String(repeating: "●", count: min(apiKey.count, 36)))
-                                            .font(.system(size: 12, design: apiKey.isEmpty ? .default : .monospaced))
-                                            .foregroundStyle(apiKey.isEmpty ? Color(NSColor.placeholderTextColor) : .primary)
-                                            .padding(.leading, 8)
-                                            .allowsHitTesting(false)
-                                        Spacer()
-                                    }
-                                )
-                        }
+                    } else {
+                        SecureField("Paste your API key…", text: $apiKey)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(size: 12, design: .monospaced))
                     }
-
                     Button(action: { showKey.toggle() }) {
                         Image(systemName: showKey ? "eye.slash" : "eye")
                             .foregroundStyle(.secondary).font(.system(size: 12))
                     }.buttonStyle(.plain)
                 }
-                Text("Stored locally. Falls back to AI_GATEWAY_API_KEY env var if empty.")
-                    .font(.caption2).foregroundStyle(.tertiary)
+                if apiKey.isEmpty {
+                    Label("No key set — will use AI_GATEWAY_API_KEY env var if available", systemImage: "exclamationmark.triangle")
+                        .font(.caption2).foregroundStyle(.orange)
+                } else {
+                    Text("Saved · \(apiKey.count) chars · prefix: \(apiKey.prefix(6))…")
+                        .font(.caption2).foregroundStyle(.tertiary)
+                }
             }
 
             // ── Base URL ─────────────────────────────────────
@@ -390,6 +381,29 @@ struct APIAndModelTab: View {
                 TextField("https://ai-gateway.vercel.sh/v1  (default)", text: $apiURL)
                     .textFieldStyle(.roundedBorder)
                     .font(.system(size: 12))
+            }
+
+            // ── Test Connection ───────────────────────────────
+            HStack(spacing: 8) {
+                Button(action: runTestConnection) {
+                    HStack(spacing: 4) {
+                        if isTesting { ProgressView().scaleEffect(0.6) }
+                        Text(isTesting ? "Testing…" : "Test Connection")
+                    }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(isTesting)
+
+                if let status = testStatus {
+                    Image(systemName: testOK ? "checkmark.circle.fill" : "xmark.circle.fill")
+                        .foregroundStyle(testOK ? .green : .red)
+                        .font(.system(size: 12))
+                    Text(status)
+                        .font(.caption)
+                        .foregroundStyle(testOK ? .green : .red)
+                        .lineLimit(2)
+                }
             }
 
             Divider()
@@ -466,6 +480,19 @@ struct APIAndModelTab: View {
         }
         .padding(4)
         .onAppear { loadCachedModels(); if fetchedModels.isEmpty { fetchModels() } }
+    }
+
+    private func runTestConnection() {
+        isTesting = true
+        testStatus = nil
+        Task {
+            let result = await TextProcessingService.shared.testConnection()
+            await MainActor.run {
+                testOK = result.ok
+                testStatus = result.message
+                isTesting = false
+            }
+        }
     }
 
     private func loadCachedModels() {
@@ -1099,21 +1126,44 @@ struct HistoryRowView: View {
                     .foregroundStyle(.tertiary)
             }
 
-            Text(item.sourceText)
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
+            // Prompt sent to LLM (collapsed by default)
+            if isExpanded {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Prompt")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                    Text(item.fullPrompt)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                        .padding(6)
+                        .background(Color(NSColor.textBackgroundColor).opacity(0.5))
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                }
+            } else {
+                Text(item.fullPrompt)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
 
             Divider()
 
+            // Result
             if isExpanded {
-                Text(item.result)
-                    .font(.system(size: 13))
-                    .textSelection(.enabled)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Result")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                    Text(item.result)
+                        .font(.system(size: 13))
+                        .textSelection(.enabled)
+                }
             } else {
                 Text(item.result)
                     .font(.system(size: 13))
-                    .lineLimit(4)
+                    .lineLimit(3)
                     .truncationMode(.tail)
             }
 
@@ -1127,6 +1177,16 @@ struct HistoryRowView: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(.blue)
+
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(item.fullPrompt, forType: .string)
+                } label: {
+                    Label("Copy Prompt", systemImage: "text.quote")
+                        .font(.system(size: 10))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
 
                 Spacer()
 

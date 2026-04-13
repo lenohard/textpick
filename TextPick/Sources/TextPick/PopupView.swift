@@ -212,7 +212,7 @@ struct PopupView: View {
                 result = output
                 isProcessing = false
                 contentMode = .result
-                HistoryStore.shared.add(sourceText: capturedText, actionName: action.label, result: output)
+                HistoryStore.shared.add(sourceText: capturedText, actionName: action.label, fullPrompt: prompt, result: output, modelName: await TextProcessingService.shared.model)
                 if autoCopy { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(output, forType: .string) }
             }
         }
@@ -231,7 +231,8 @@ struct PopupView: View {
                 result = output
                 isProcessing = false
                 contentMode = .result
-                HistoryStore.shared.add(sourceText: capturedText, actionName: "Custom: \(instruction)", result: output)
+                let fullPrompt = "[System]\n\(instruction)\n\n[User]\n\(capturedText)"
+                HistoryStore.shared.add(sourceText: capturedText, actionName: "Custom", fullPrompt: fullPrompt, result: output, modelName: await TextProcessingService.shared.model)
                 if autoCopy { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(output, forType: .string) }
             }
         }
