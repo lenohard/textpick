@@ -1112,90 +1112,112 @@ struct HistorySettingsTab: View {
 struct HistoryRowView: View {
     let item: HistoryItem
     let formatter: DateFormatter
-    @State private var isExpanded = false
+    @State private var promptExpanded = false
+    @State private var resultExpanded = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            HStack {
+
+            // ── Header: action · model · time ──────────────
+            HStack(spacing: 6) {
                 Label(item.actionName, systemImage: "bolt.fill")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.blue)
+                if !item.modelName.isEmpty {
+                    Text("·").foregroundStyle(.tertiary).font(.system(size: 10))
+                    Text(item.modelName)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                }
                 Spacer()
                 Text(formatter.string(from: item.date))
                     .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
             }
 
-            // Prompt sent to LLM (collapsed by default)
-            if isExpanded {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Prompt")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(.tertiary)
+            // ── Prompt (collapsible, collapsed by default) ─
+            VStack(alignment: .leading, spacing: 2) {
+                Button(action: { withAnimation(.easeInOut(duration: 0.15)) { promptExpanded.toggle() } }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: promptExpanded ? "chevron.down" : "chevron.right")
+                            .font(.system(size: 9, weight: .semibold))
+                        Text("Prompt")
+                            .font(.system(size: 10, weight: .semibold))
+                        if !promptExpanded {
+                            Text(item.fullPrompt.prefix(80).replacingOccurrences(of: "\n", with: " "))
+                                .font(.system(size: 10))
+                                .foregroundStyle(.tertiary)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                        }
+                        Spacer()
+                        if promptExpanded {
+                            Button {
+                                NSPasteboard.general.clearContents()
+                                NSPasteboard.general.setString(item.fullPrompt, forType: .string)
+                            } label: {
+                                Image(systemName: "doc.on.doc").font(.system(size: 9))
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.secondary)
+                        }
+                    }
+                    .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+
+                if promptExpanded {
                     Text(item.fullPrompt)
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)
                         .padding(6)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                         .background(Color(NSColor.textBackgroundColor).opacity(0.5))
                         .clipShape(RoundedRectangle(cornerRadius: 4))
                 }
-            } else {
-                Text(item.fullPrompt)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
             }
 
             Divider()
 
-            // Result
-            if isExpanded {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Result")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(.tertiary)
+            // ── Result (expanded by default) ───────────────
+            VStack(alignment: .leading, spacing: 2) {
+                Button(action: { withAnimation(.easeInOut(duration: 0.15)) { resultExpanded.toggle() } }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: resultExpanded ? "chevron.down" : "chevron.right")
+                            .font(.system(size: 9, weight: .semibold))
+                        Text("Result")
+                            .font(.system(size: 10, weight: .semibold))
+                        if !resultExpanded {
+                            Text(item.result.prefix(80).replacingOccurrences(of: "\n", with: " "))
+                                .font(.system(size: 10))
+                                .foregroundStyle(.tertiary)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                        }
+                        Spacer()
+                        if resultExpanded {
+                            Button {
+                                NSPasteboard.general.clearContents()
+                                NSPasteboard.general.setString(item.result, forType: .string)
+                            } label: {
+                                Image(systemName: "doc.on.doc").font(.system(size: 9))
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.blue)
+                        }
+                    }
+                    .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+
+                if resultExpanded {
                     Text(item.result)
                         .font(.system(size: 13))
                         .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
-            } else {
-                Text(item.result)
-                    .font(.system(size: 13))
-                    .lineLimit(3)
-                    .truncationMode(.tail)
-            }
-
-            HStack(spacing: 12) {
-                Button {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(item.result, forType: .string)
-                } label: {
-                    Label("Copy Result", systemImage: "doc.on.doc")
-                        .font(.system(size: 10))
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.blue)
-
-                Button {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(item.fullPrompt, forType: .string)
-                } label: {
-                    Label("Copy Prompt", systemImage: "text.quote")
-                        .font(.system(size: 10))
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-
-                Spacer()
-
-                Button(isExpanded ? "Show Less" : "Show More") {
-                    withAnimation(.easeInOut(duration: 0.15)) { isExpanded.toggle() }
-                }
-                .buttonStyle(.plain)
-                .font(.system(size: 10))
-                .foregroundStyle(.secondary)
             }
         }
         .padding(.vertical, 4)

@@ -208,11 +208,12 @@ struct PopupView: View {
         let prompt = action.renderPrompt(with: capturedText)
         Task {
             let output = await TextProcessingService.shared.process(prompt)
+            let usedModel = await TextProcessingService.shared.model
             await MainActor.run {
                 result = output
                 isProcessing = false
                 contentMode = .result
-                HistoryStore.shared.add(sourceText: capturedText, actionName: action.label, fullPrompt: prompt, result: output, modelName: await TextProcessingService.shared.model)
+                HistoryStore.shared.add(sourceText: capturedText, actionName: action.label, fullPrompt: prompt, result: output, modelName: usedModel)
                 if autoCopy { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(output, forType: .string) }
             }
         }
@@ -227,12 +228,13 @@ struct PopupView: View {
         if switchToResult { contentMode = .result }
         Task {
             let output = await TextProcessingService.shared.process(instruction, userText: capturedText)
+            let usedModel = await TextProcessingService.shared.model
             await MainActor.run {
                 result = output
                 isProcessing = false
                 contentMode = .result
                 let fullPrompt = "[System]\n\(instruction)\n\n[User]\n\(capturedText)"
-                HistoryStore.shared.add(sourceText: capturedText, actionName: "Custom", fullPrompt: fullPrompt, result: output, modelName: await TextProcessingService.shared.model)
+                HistoryStore.shared.add(sourceText: capturedText, actionName: "Custom", fullPrompt: fullPrompt, result: output, modelName: usedModel)
                 if autoCopy { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(output, forType: .string) }
             }
         }
