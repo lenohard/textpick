@@ -1,9 +1,10 @@
 import SwiftUI
+import AppKit
 
 // MARK: - Main Popup View
 
 struct PopupView: View {
-    let capturedText: String
+    let content: CapturedContent
     @ObservedObject var pinnedState: PinnedState
     let onClose: () -> Void
 
@@ -26,25 +27,42 @@ struct PopupView: View {
     private enum ContentMode { case input, result }
     @State private var contentMode: ContentMode = .input
 
+    private var isImageMode: Bool {
+        if case .image = content { return true }
+        return false
+    }
+
+    private var capturedText: String {
+        if case .text(let t) = content { return t }
+        return ""
+    }
+
     private var enabledActions: [TextAction] {
         store.actions.filter(\.isEnabled)
+    }
+
+    private var enabledVisionActions: [TextAction] {
+        store.visionActions.filter(\.isEnabled)
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             headerView
             Divider()
-            // Shared content region: input text ↔ result
+            // Shared content region: input text/image ↔ result
             if showInputText || contentMode == .result || isProcessing {
                 contentRegion
                 Divider()
             }
-            actionButtonsView
+            if isImageMode {
+                visionActionButtonsView
+            } else {
+                actionButtonsView
+            }
             Divider()
             customPromptView
         }
         .frame(width: CGFloat(popupWidthPref > 0 ? popupWidthPref : 420))
-
         .background(.regularMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .overlay(
@@ -57,17 +75,25 @@ struct PopupView: View {
 
     private var headerView: some View {
         HStack(spacing: 8) {
-            Image(systemName: "text.cursor")
-                .foregroundStyle(.blue)
-                .font(.system(size: 13))
-            Text("TextPick")
-                .font(.system(size: 13, weight: .semibold))
+            if isImageMode {
+                Image(systemName: "photo")
+                    .foregroundStyle(.purple)
+                    .font(.system(size: 13))
+                Text("TextPick · Image")
+                    .font(.system(size: 13, weight: .semibold))
+            } else {
+                Image(systemName: "text.cursor")
+                    .foregroundStyle(.blue)
+                    .font(.system(size: 13))
+                Text("TextPick")
+                    .font(.system(size: 13, weight: .semibold))
+            }
             Spacer()
 
             // Tab switcher — only show when result is available
             if !result.isEmpty || isProcessing {
                 Picker("", selection: $contentMode) {
-                    Text("Input").tag(ContentMode.input)
+                    Text(isImageMode ? "Image" : "Input").tag(ContentMode.input)
                     Text("Result").tag(ContentMode.result)
                 }
                 .pickerStyle(.segmented)
@@ -80,7 +106,7 @@ struct PopupView: View {
                 Image(systemName: pinnedState.pinned ? "pin.fill" : "pin")
                     .font(.system(size: 13))
                     .foregroundStyle(pinnedState.pinned ? .blue : .secondary)
-                    .rotationEffect(.degrees(45))  // pin icon looks better at 45°
+                    .rotationEffect(.degrees(45))
             }
             .buttonStyle(.plain)
             .help(pinnedState.pinned ? "Unpin (auto-close on click away)" : "Pin (keep open)")
@@ -93,28 +119,46 @@ struct PopupView: View {
 
     private var contentRegion: some View {
         ZStack(alignment: .topLeading) {
-            // Input text
-            inputTextView
+            // Input: text or image
+            inputContentView
                 .opacity(contentMode == .input ? 1 : 0)
 
             // Result / processing
             resultContentView
                 .opacity(contentMode == .result ? 1 : 0)
         }
-        .frame(minHeight: 80, maxHeight: 200)
+        .frame(minHeight: isImageMode ? 140 : 80, maxHeight: isImageMode ? 260 : 200)
         .animation(.easeInOut(duration: 0.18), value: contentMode)
     }
 
-    private var inputTextView: some View {
-        ScrollView {
-            Text(capturedText)
-                .font(.system(size: CGFloat(fontSize)))
-                .foregroundStyle(.primary.opacity(0.78))
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(12)
-                .textSelection(.enabled)
+    @ViewBuilder
+    private var inputContentView: some View {
+        switch content {
+        case .text(let text):
+            ScrollView {
+                Text(text)
+                    .font(.system(size: CGFloat(fontSize)))
+                    .foregroundStyle(.primary.opacity(0.78))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
+                    .textSelection(.enabled)
+            }
+            .background(Color.primary.opacity(0.03))
+
+        case .image(let image, _):
+            imagePreviewView(image: image)
         }
-        .background(Color.primary.opacity(0.03))
+    }
+
+    private func imagePreviewView(image: NSImage) -> some View {
+        ZStack {
+            Color.black.opacity(0.06)
+            Image(nsImage: image)
+                .resizable()
+                .scaledToFit()
+                .cornerRadius(6)
+                .padding(10)
+        }
     }
 
     private var resultContentView: some View {
@@ -130,12 +174,27 @@ struct PopupView: View {
                 .background(Color.primary.opacity(0.03))
             } else if !result.isEmpty {
                 ScrollView {
-                    Text(result)
-                        .font(.system(size: CGFloat(fontSize)))
-                        .lineSpacing(3)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(12)
-                        .textSelection(.enabled)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(result)
+                            .font(.system(size: CGFloat(fontSize)))
+                            .lineSpacing(3)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .textSelection(.enabled)
+
+                        HStack {
+                            Spacer()
+                            Button {
+                                NSPasteboard.general.clearContents()
+                                NSPasteboard.general.setString(result, forType: .string)
+                            } label: {
+                                Label("Copy", systemImage: "doc.on.doc")
+                                    .font(.caption)
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.mini)
+                        }
+                    }
+                    .padding(12)
                 }
                 .background(Color.primary.opacity(0.03))
             } else {
@@ -144,7 +203,7 @@ struct PopupView: View {
         }
     }
 
-    // MARK: - Action Buttons
+    // MARK: - Action Buttons (text mode)
 
     private var actionButtonsView: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -155,7 +214,27 @@ struct PopupView: View {
                         isActive: activeActionID == action.id,
                         isLoading: isProcessing && activeActionID == action.id
                     ) {
-                        runAction(action)
+                        runTextAction(action)
+                    }
+                }
+            }
+            .padding(.horizontal, 8)
+        }
+        .padding(.vertical, 4)
+    }
+
+    // MARK: - Vision Action Buttons (image mode)
+
+    private var visionActionButtonsView: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 4) {
+                ForEach(enabledVisionActions) { action in
+                    ActionButton(
+                        action: action,
+                        isActive: activeActionID == action.id,
+                        isLoading: isProcessing && activeActionID == action.id
+                    ) {
+                        runVisionAction(action)
                     }
                 }
             }
@@ -169,23 +248,29 @@ struct PopupView: View {
     private var customPromptView: some View {
         HStack(spacing: 8) {
             HStack(spacing: 6) {
-                Image(systemName: "pencil.and.sparkles")
+                Image(systemName: isImageMode ? "questionmark.bubble" : "pencil.and.sparkles")
                     .foregroundStyle(.tertiary)
                     .font(.system(size: 12))
-                TextField("Custom instruction for the selected text…", text: $customPrompt)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 13))
-                    .onSubmit { runCustomPrompt() }
+                TextField(
+                    isImageMode ? "Ask about this image…" : "Custom instruction for the selected text…",
+                    text: $customPrompt
+                )
+                .textFieldStyle(.plain)
+                .font(.system(size: 13))
+                .onSubmit {
+                    if isImageMode { runCustomVisionPrompt() }
+                    else { runCustomPrompt() }
+                }
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
             .background(Color.primary.opacity(0.05))
             .clipShape(RoundedRectangle(cornerRadius: 8))
 
-            Button(action: runCustomPrompt) {
+            Button(action: { if isImageMode { runCustomVisionPrompt() } else { runCustomPrompt() } }) {
                 Image(systemName: "arrow.up.circle.fill")
                     .font(.system(size: 26))
-                    .foregroundStyle(canSubmitCustom ? .blue : Color.secondary.opacity(0.4))
+                    .foregroundStyle(canSubmitCustom ? (isImageMode ? .purple : .blue) : Color.secondary.opacity(0.4))
             }
             .buttonStyle(.plain)
             .disabled(!canSubmitCustom)
@@ -198,9 +283,9 @@ struct PopupView: View {
         !customPrompt.trimmingCharacters(in: .whitespaces).isEmpty && !isProcessing
     }
 
-    // MARK: - Handlers
+    // MARK: - Handlers (text)
 
-    private func runAction(_ action: TextAction) {
+    private func runTextAction(_ action: TextAction) {
         activeActionID = action.id
         isProcessing = true
         result = ""
@@ -235,6 +320,48 @@ struct PopupView: View {
                 contentMode = .result
                 let fullPrompt = "[System]\n\(instruction)\n\n[User]\n\(capturedText)"
                 HistoryStore.shared.add(sourceText: capturedText, actionName: "Custom", fullPrompt: fullPrompt, result: output, modelName: usedModel)
+                if autoCopy { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(output, forType: .string) }
+            }
+        }
+    }
+
+    // MARK: - Handlers (vision)
+
+    private func runVisionAction(_ action: TextAction) {
+        guard case .image(_, let data) = content else { return }
+        activeActionID = action.id
+        isProcessing = true
+        result = ""
+        if switchToResult { contentMode = .result }
+        Task {
+            let output = await TextProcessingService.shared.processImage(imageData: data, prompt: action.prompt)
+            let usedModel = await TextProcessingService.shared.visionModel
+            await MainActor.run {
+                result = output
+                isProcessing = false
+                contentMode = .result
+                HistoryStore.shared.add(sourceText: "[Image]", actionName: action.label, fullPrompt: action.prompt, result: output, modelName: usedModel)
+                if autoCopy { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(output, forType: .string) }
+            }
+        }
+    }
+
+    private func runCustomVisionPrompt() {
+        guard case .image(_, let data) = content else { return }
+        let instruction = customPrompt.trimmingCharacters(in: .whitespaces)
+        guard !instruction.isEmpty else { return }
+        activeActionID = nil
+        isProcessing = true
+        result = ""
+        if switchToResult { contentMode = .result }
+        Task {
+            let output = await TextProcessingService.shared.processImage(imageData: data, prompt: instruction)
+            let usedModel = await TextProcessingService.shared.visionModel
+            await MainActor.run {
+                result = output
+                isProcessing = false
+                contentMode = .result
+                HistoryStore.shared.add(sourceText: "[Image]", actionName: "Custom Vision", fullPrompt: instruction, result: output, modelName: usedModel)
                 if autoCopy { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(output, forType: .string) }
             }
         }

@@ -8,7 +8,7 @@ class PopupWindowController: NSWindowController {
     /// Reflected into SwiftUI so the pin button can toggle it
     private let pinnedBinding = PinnedState()
 
-    init(capturedText: String) {
+    init(content: CapturedContent) {
         let savedWidth = UserDefaults.standard.double(forKey: "textpick.popupWidth")
         let panelWidth = savedWidth > 0 ? savedWidth : 420
         let opacity = UserDefaults.standard.double(forKey: "textpick.opacity")
@@ -37,7 +37,7 @@ class PopupWindowController: NSWindowController {
         panel.alphaValue = CGFloat(panelOpacity)
 
         let rootView = PopupView(
-            capturedText: capturedText,
+            content: content,
             pinnedState: pinnedBinding,
             onClose: { panel.close() }
         )

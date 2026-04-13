@@ -9,6 +9,8 @@ struct TextAction: Identifiable, Codable, Equatable {
     var icon: String          // SF Symbol name
     var prompt: String        // May contain {{text}} placeholder
     var isEnabled: Bool = true
+    /// When true, this action appears in image mode (vision tasks)
+    var supportsImage: Bool = false
 
     /// Renders the final prompt by substituting {{text}} with the captured text.
     /// If the prompt contains no placeholder, the captured text is appended.
@@ -23,6 +25,40 @@ struct TextAction: Identifiable, Codable, Equatable {
 // MARK: - Default Actions
 
 extension TextAction {
+    /// Default vision actions shown when an image is captured
+    static let visionDefaults: [TextAction] = [
+        TextAction(
+            label: "OCR",
+            icon: "doc.text.viewfinder",
+            prompt: "Extract all text from this image. Return only the extracted text, preserving original formatting and line breaks. If no text is found, say 'No text found'.",
+            supportsImage: true
+        ),
+        TextAction(
+            label: "Describe",
+            icon: "eye",
+            prompt: "Describe this image in detail. What do you see? Include objects, people, text, colors, layout, and any notable details.",
+            supportsImage: true
+        ),
+        TextAction(
+            label: "Ask",
+            icon: "questionmark.bubble",
+            prompt: "Look at this image and answer: what is shown here? Provide a comprehensive analysis.",
+            supportsImage: true
+        ),
+        TextAction(
+            label: "Translate",
+            icon: "globe",
+            prompt: "Extract all text from this image and translate it to Chinese. Show the original text and translation side by side.",
+            supportsImage: true
+        ),
+        TextAction(
+            label: "Summarize",
+            icon: "list.bullet.rectangle",
+            prompt: "Summarize the key information or content shown in this image.",
+            supportsImage: true
+        ),
+    ]
+
     static let defaults: [TextAction] = [
         TextAction(
             label: "Format",
@@ -88,11 +124,14 @@ class ActionsStore: ObservableObject {
     static let shared = ActionsStore()
 
     @Published var actions: [TextAction] = []
+    @Published var visionActions: [TextAction] = []
 
     private let defaultsKey = "textpick.actions"
+    private let visionDefaultsKey = "textpick.visionActions"
 
     private init() {
         load()
+        loadVision()
     }
 
     // MARK: - Persistence
@@ -113,12 +152,33 @@ class ActionsStore: ObservableObject {
         }
     }
 
+    func loadVision() {
+        if let data = UserDefaults.standard.data(forKey: visionDefaultsKey),
+           let decoded = try? JSONDecoder().decode([TextAction].self, from: data) {
+            visionActions = decoded
+        } else {
+            visionActions = TextAction.visionDefaults
+            saveVision()
+        }
+    }
+
+    func saveVision() {
+        if let data = try? JSONEncoder().encode(visionActions) {
+            UserDefaults.standard.set(data, forKey: visionDefaultsKey)
+        }
+    }
+
     func resetToDefaults() {
         actions = TextAction.defaults
         save()
     }
 
-    // MARK: - CRUD
+    func resetVisionToDefaults() {
+        visionActions = TextAction.visionDefaults
+        saveVision()
+    }
+
+    // MARK: - CRUD (text actions)
 
     func add(_ action: TextAction) {
         actions.append(action)
@@ -140,5 +200,29 @@ class ActionsStore: ObservableObject {
     func move(from source: IndexSet, to destination: Int) {
         actions.move(fromOffsets: source, toOffset: destination)
         save()
+    }
+
+    // MARK: - CRUD (vision actions)
+
+    func addVision(_ action: TextAction) {
+        visionActions.append(action)
+        saveVision()
+    }
+
+    func updateVision(_ action: TextAction) {
+        if let idx = visionActions.firstIndex(where: { $0.id == action.id }) {
+            visionActions[idx] = action
+            saveVision()
+        }
+    }
+
+    func deleteVision(at offsets: IndexSet) {
+        visionActions.remove(atOffsets: offsets)
+        saveVision()
+    }
+
+    func moveVision(from source: IndexSet, to destination: Int) {
+        visionActions.move(fromOffsets: source, toOffset: destination)
+        saveVision()
     }
 }

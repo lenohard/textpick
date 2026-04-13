@@ -120,18 +120,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Capture
 
     @objc func captureText() {
-        TextCaptureService.shared.captureSelectedText { [weak self] text in
-            guard let text = text, !text.isEmpty else { return }
-            self?.showPopup(with: text)
+        TextCaptureService.shared.captureContent { [weak self] content in
+            guard let content = content else { return }
+            self?.showPopup(with: content)
         }
     }
 
     // MARK: - Popup
 
-    private func showPopup(with text: String) {
+    private func showPopup(with content: CapturedContent) {
         // Close any existing popup first
         popupWindowController?.close()
-        popupWindowController = PopupWindowController(capturedText: text)
+        popupWindowController = PopupWindowController(content: content)
         popupWindowController?.showWindow(nil)
     }
 }

@@ -34,6 +34,11 @@ actor TextProcessingService {
             ?? "anthropic/claude-haiku-4.5"
     }
 
+    var visionModel: String {
+        UserDefaults.standard.string(forKey: "textpick.visionModel")?.nilIfEmpty
+            ?? model  // fall back to text model if it supports vision
+    }
+
     // MARK: - Public API
 
     /// For actions: the entire rendered prompt is passed as the system message,
@@ -53,6 +58,63 @@ actor TextProcessingService {
         } catch {
             return "⚠️ Error: \(error.localizedDescription)"
         }
+    }
+
+    /// Vision: send an image + prompt to the vision model.
+    func processImage(imageData: Data, prompt: String) async -> String {
+        do {
+            return try await callVisionAPI(imageData: imageData, prompt: prompt)
+        } catch {
+            return "⚠️ Error: \(error.localizedDescription)"
+        }
+    }
+
+    // MARK: - Vision API Call
+
+    private func callVisionAPI(imageData: Data, prompt: String) async throws -> String {
+        let key = apiKey
+        let url_base = baseURL
+        let mdl = visionModel
+        guard !key.isEmpty else { throw APIError.missingAPIKey }
+        guard let url = URL(string: "\(url_base)/chat/completions") else { throw APIError.invalidURL }
+
+        let base64 = imageData.base64EncodedString()
+        let imageURL = "data:image/png;base64,\(base64)"
+
+        // OpenAI vision format
+        let userContent: [[String: Any]] = [
+            ["type": "image_url", "image_url": ["url": imageURL]],
+            ["type": "text", "text": prompt]
+        ]
+        let messages: [[String: Any]] = [
+            ["role": "user", "content": userContent]
+        ]
+        let body: [String: Any] = [
+            "model": mdl,
+            "messages": messages,
+            "max_tokens": 2048,
+        ]
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        request.timeoutInterval = 60
+
+        let config = URLSessionConfiguration.ephemeral
+        config.httpAdditionalHeaders = ["Authorization": "Bearer \(key)"]
+        let session = URLSession(configuration: config)
+        let (data, response) = try await session.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse else { throw APIError.invalidResponse }
+        guard httpResponse.statusCode == 200 else {
+            let body = String(data: data, encoding: .utf8) ?? ""
+            throw APIError.httpError(httpResponse.statusCode, body)
+        }
+
+        let decoded = try JSONDecoder().decode(OpenAIChatResponse.self, from: data)
+        return decoded.choices.first?.message.content ?? "(empty response)"
     }
 
     // MARK: - API Call (OpenAI-compatible)
@@ -110,6 +172,50 @@ actor TextProcessingService {
         return decoded.choices.first?.message.content ?? "(empty response)"
     }
 
+    // MARK: - Model Metadata
+
+    struct ModelMetadata: Sendable {
+        let supportsVision: Bool
+        let inputPricePerMillion: Double?   // USD per 1M input tokens
+        let outputPricePerMillion: Double?  // USD per 1M output tokens
+        let notes: String?
+    }
+
+    /// Hardcoded metadata for known models. Vision capability and pricing.
+    static let modelMetadataTable: [String: ModelMetadata] = [
+        // Anthropic
+        "anthropic/claude-haiku-4-5":         ModelMetadata(supportsVision: true,  inputPricePerMillion: 0.80,  outputPricePerMillion: 4.00,   notes: nil),
+        "anthropic/claude-haiku-4.5":         ModelMetadata(supportsVision: true,  inputPricePerMillion: 0.80,  outputPricePerMillion: 4.00,   notes: nil),
+        "anthropic/claude-sonnet-4-5":        ModelMetadata(supportsVision: true,  inputPricePerMillion: 3.00,  outputPricePerMillion: 15.00,  notes: nil),
+        "anthropic/claude-sonnet-4.5":        ModelMetadata(supportsVision: true,  inputPricePerMillion: 3.00,  outputPricePerMillion: 15.00,  notes: nil),
+        "anthropic/claude-sonnet-4-6":        ModelMetadata(supportsVision: true,  inputPricePerMillion: 3.00,  outputPricePerMillion: 15.00,  notes: nil),
+        "anthropic/claude-opus-4-5":          ModelMetadata(supportsVision: true,  inputPricePerMillion: 15.00, outputPricePerMillion: 75.00,  notes: nil),
+        "anthropic/claude-3-5-haiku-20241022":ModelMetadata(supportsVision: true,  inputPricePerMillion: 0.80,  outputPricePerMillion: 4.00,   notes: nil),
+        "anthropic/claude-3-5-sonnet-20241022":ModelMetadata(supportsVision: true, inputPricePerMillion: 3.00,  outputPricePerMillion: 15.00,  notes: nil),
+        // OpenAI
+        "openai/gpt-4o":                      ModelMetadata(supportsVision: true,  inputPricePerMillion: 2.50,  outputPricePerMillion: 10.00,  notes: nil),
+        "openai/gpt-4o-mini":                 ModelMetadata(supportsVision: true,  inputPricePerMillion: 0.15,  outputPricePerMillion: 0.60,   notes: nil),
+        "openai/gpt-4.1":                     ModelMetadata(supportsVision: true,  inputPricePerMillion: 2.00,  outputPricePerMillion: 8.00,   notes: nil),
+        "openai/gpt-4.1-mini":                ModelMetadata(supportsVision: true,  inputPricePerMillion: 0.40,  outputPricePerMillion: 1.60,   notes: nil),
+        "openai/gpt-4.1-nano":                ModelMetadata(supportsVision: true,  inputPricePerMillion: 0.10,  outputPricePerMillion: 0.40,   notes: nil),
+        "openai/gpt-5-nano":                  ModelMetadata(supportsVision: true,  inputPricePerMillion: 0.10,  outputPricePerMillion: 0.40,   notes: nil),
+        "openai/o4-mini":                     ModelMetadata(supportsVision: true,  inputPricePerMillion: 1.10,  outputPricePerMillion: 4.40,   notes: "thinking"),
+        "openai/o3":                          ModelMetadata(supportsVision: true,  inputPricePerMillion: 10.00, outputPricePerMillion: 40.00,  notes: "thinking"),
+        // Google
+        "google/gemini-2.0-flash":            ModelMetadata(supportsVision: true,  inputPricePerMillion: 0.10,  outputPricePerMillion: 0.40,   notes: nil),
+        "google/gemini-2.0-flash-lite":       ModelMetadata(supportsVision: true,  inputPricePerMillion: 0.075, outputPricePerMillion: 0.30,   notes: nil),
+        "google/gemini-2.5-flash":            ModelMetadata(supportsVision: true,  inputPricePerMillion: 0.15,  outputPricePerMillion: 0.60,   notes: nil),
+        "google/gemini-2.5-pro":              ModelMetadata(supportsVision: true,  inputPricePerMillion: 1.25,  outputPricePerMillion: 10.00,  notes: "thinking"),
+        "google/gemini-3-flash":              ModelMetadata(supportsVision: true,  inputPricePerMillion: 0.15,  outputPricePerMillion: 0.60,   notes: nil),
+        // DeepSeek
+        "deepseek/deepseek-chat":             ModelMetadata(supportsVision: false, inputPricePerMillion: 0.27,  outputPricePerMillion: 1.10,   notes: nil),
+        "deepseek/deepseek-r1":               ModelMetadata(supportsVision: false, inputPricePerMillion: 0.55,  outputPricePerMillion: 2.19,   notes: "thinking"),
+    ]
+
+    static func metadata(for modelID: String) -> ModelMetadata? {
+        modelMetadataTable[modelID]
+    }
+
     // MARK: - Fetch Models
 
     struct ModelInfo: Identifiable, Sendable, Codable {
@@ -127,6 +233,8 @@ actor TextProcessingService {
         var provider: String {
             String(id.split(separator: "/").first ?? Substring(id))
         }
+        var metadata: ModelMetadata? { TextProcessingService.metadata(for: id) }
+        var supportsVision: Bool { metadata?.supportsVision ?? false }
     }
 
     /// Lightweight test: hits /v1/models to verify key + connectivity.

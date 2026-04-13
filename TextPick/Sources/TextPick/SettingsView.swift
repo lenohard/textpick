@@ -8,6 +8,9 @@ struct SettingsView: View {
             ActionsSettingsTab()
                 .tabItem { Label("Actions", systemImage: "bolt.fill") }
 
+            VisionActionsSettingsTab()
+                .tabItem { Label("Vision", systemImage: "eye") }
+
             APIAndModelTab()
                 .tabItem { Label("API & Model", systemImage: "cpu") }
 
@@ -17,7 +20,7 @@ struct SettingsView: View {
             HistorySettingsTab()
                 .tabItem { Label("History", systemImage: "clock.arrow.circlepath") }
         }
-        .frame(width: 680, height: 520)
+        .frame(width: 680, height: 540)
         .padding(16)
     }
 }
@@ -94,7 +97,7 @@ struct ActionsSettingsTab: View {
             }
         }
         .sheet(isPresented: $showingAddSheet) {
-            NewActionSheet { newAction in
+            NewActionSheet(isVision: false) { newAction in
                 store.add(newAction)
                 selectedID = newAction.id
             }
@@ -114,13 +117,15 @@ struct ActionsSettingsTab: View {
 struct ActionRow: View {
     @ObservedObject private var store = ActionsStore.shared
     let action: TextAction
+    var isVision: Bool = false
 
     var body: some View {
         HStack(spacing: 8) {
             Toggle("", isOn: Binding(
                 get: { action.isEnabled },
                 set: { val in
-                    var a = action; a.isEnabled = val; store.update(a)
+                    var a = action; a.isEnabled = val
+                    if isVision { store.updateVision(a) } else { store.update(a) }
                 }
             ))
             .toggleStyle(.checkbox)
@@ -128,7 +133,7 @@ struct ActionRow: View {
 
             Image(systemName: action.icon)
                 .frame(width: 18)
-                .foregroundStyle(.blue)
+                .foregroundStyle(isVision ? .purple : .blue)
 
             Text(action.label)
                 .lineLimit(1)
@@ -141,6 +146,7 @@ struct ActionRow: View {
 
 struct ActionEditor: View {
     let action: TextAction
+    var isVision: Bool = false
     let onSave: (TextAction) -> Void
 
     @State private var label: String
@@ -154,10 +160,12 @@ struct ActionEditor: View {
         "questionmark.bubble", "globe", "doc.on.doc", "pencil",
         "lightbulb", "brain", "sparkles", "quote.bubble",
         "arrow.triangle.2.circlepath", "scissors", "list.bullet",
+        "doc.text.viewfinder", "eye", "photo", "list.bullet.rectangle",
     ]
 
-    init(action: TextAction, onSave: @escaping (TextAction) -> Void) {
+    init(action: TextAction, isVision: Bool = false, onSave: @escaping (TextAction) -> Void) {
         self.action = action
+        self.isVision = isVision
         self.onSave = onSave
         _label   = State(initialValue: action.label)
         _icon    = State(initialValue: action.icon)
@@ -208,9 +216,13 @@ struct ActionEditor: View {
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
                     Text("Prompt").font(.caption).foregroundStyle(.secondary)
-                    Text("(use {{text}} as placeholder for captured text)")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
+                    if isVision {
+                        Text("(sent directly to the vision model with the image)")
+                            .font(.caption).foregroundStyle(.tertiary)
+                    } else {
+                        Text("(use {{text}} as placeholder for captured text)")
+                            .font(.caption).foregroundStyle(.tertiary)
+                    }
                 }
                 TextEditor(text: $prompt)
                     .font(.system(size: 12, design: .monospaced))
@@ -247,6 +259,7 @@ struct ActionEditor: View {
 // MARK: - New Action Sheet
 
 struct NewActionSheet: View {
+    var isVision: Bool = false
     let onCreate: (TextAction) -> Void
     @Environment(\.dismiss) private var dismiss
 
@@ -259,6 +272,7 @@ struct NewActionSheet: View {
         "questionmark.bubble", "globe", "doc.on.doc", "pencil",
         "lightbulb", "brain", "sparkles", "quote.bubble",
         "arrow.triangle.2.circlepath", "scissors", "list.bullet",
+        "doc.text.viewfinder", "eye", "photo", "list.bullet.rectangle",
     ]
 
     var body: some View {
@@ -294,8 +308,13 @@ struct NewActionSheet: View {
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
                     Text("Prompt").font(.caption).foregroundStyle(.secondary)
-                    Text("(use {{text}} for captured text)")
-                        .font(.caption).foregroundStyle(.tertiary)
+                    if isVision {
+                        Text("(sent to vision model with the image)")
+                            .font(.caption).foregroundStyle(.tertiary)
+                    } else {
+                        Text("(use {{text}} for captured text)")
+                            .font(.caption).foregroundStyle(.tertiary)
+                    }
                 }
                 TextEditor(text: $prompt)
                     .font(.system(size: 12, design: .monospaced))
@@ -307,7 +326,7 @@ struct NewActionSheet: View {
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
                 Button("Create") {
-                    let action = TextAction(label: label, icon: icon, prompt: prompt)
+                    let action = TextAction(label: label, icon: icon, prompt: prompt, supportsImage: isVision)
                     onCreate(action)
                     dismiss()
                 }
@@ -321,12 +340,103 @@ struct NewActionSheet: View {
     }
 }
 
+// MARK: - Vision Actions Settings Tab
+
+struct VisionActionsSettingsTab: View {
+    @ObservedObject private var store = ActionsStore.shared
+    @State private var selectedID: UUID? = nil
+    @State private var showingAddSheet = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Info banner
+            HStack(spacing: 8) {
+                Image(systemName: "info.circle").foregroundStyle(.blue)
+                Text("Vision actions appear when an image is captured from clipboard (e.g. screenshot). Requires a vision-capable model set in API & Model.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            .padding(10)
+            .background(Color.blue.opacity(0.07))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .padding(.bottom, 10)
+
+            HSplitView {
+                // Left: list
+                VStack(spacing: 0) {
+                    List(selection: $selectedID) {
+                        ForEach(store.visionActions) { action in
+                            ActionRow(action: action, isVision: true)
+                                .tag(action.id)
+                        }
+                        .onDelete(perform: store.deleteVision)
+                        .onMove(perform: store.moveVision)
+                    }
+                    .listStyle(.bordered)
+
+                    Divider()
+                    HStack(spacing: 4) {
+                        Button(action: { showingAddSheet = true }) {
+                            Image(systemName: "plus")
+                        }.buttonStyle(.borderless)
+
+                        Button(action: deleteSelected) {
+                            Image(systemName: "minus")
+                        }.buttonStyle(.borderless).disabled(selectedID == nil)
+
+                        Spacer()
+                        Button("Reset Defaults") {
+                            store.resetVisionToDefaults()
+                            selectedID = nil
+                        }
+                        .buttonStyle(.borderless)
+                        .foregroundStyle(.secondary)
+                        .font(.system(size: 11))
+                    }
+                    .padding(.horizontal, 8).padding(.vertical, 4)
+                }
+                .frame(minWidth: 200, maxWidth: 240)
+
+                // Right: editor
+                Group {
+                    if let id = selectedID,
+                       let action = store.visionActions.first(where: { $0.id == id }) {
+                        ActionEditor(action: action, isVision: true) { updated in
+                            store.updateVision(updated)
+                        }
+                        .id(id)
+                    } else {
+                        VStack {
+                            Image(systemName: "arrow.left").font(.title).foregroundStyle(.tertiary)
+                            Text("Select a vision action to edit").foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
+                }
+            }
+        }
+        .sheet(isPresented: $showingAddSheet) {
+            NewActionSheet(isVision: true) { newAction in
+                store.addVision(newAction)
+                selectedID = newAction.id
+            }
+        }
+    }
+
+    private func deleteSelected() {
+        guard let id = selectedID,
+              let idx = store.visionActions.firstIndex(where: { $0.id == id }) else { return }
+        store.deleteVision(at: IndexSet([idx]))
+        selectedID = nil
+    }
+}
+
 // MARK: - API & Model Tab
 
 struct APIAndModelTab: View {
     @AppStorage("textpick.apiKey")  private var apiKey:  String = ""
     @AppStorage("textpick.apiURL")  private var apiURL:  String = ""
     @AppStorage("textpick.model")   private var model:   String = "anthropic/claude-haiku-4.5"
+    @AppStorage("textpick.visionModel") private var visionModel: String = ""
     @AppStorage("textpick.savedModels") private var savedModelsJSON: String = ""
 
     @State private var fetchedModels: [TextProcessingService.ModelInfo] = []
@@ -408,9 +518,31 @@ struct APIAndModelTab: View {
 
             Divider()
 
-            // ── Model ────────────────────────────────────────
+            // ── Vision Model ────────────────────────────────
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("Vision Model").font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
+                    Image(systemName: "eye").foregroundStyle(.purple).font(.caption)
+                }
+                HStack(spacing: 6) {
+                    TextField("Leave empty to use same model as text", text: $visionModel)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(size: 12))
+                    if !visionModel.isEmpty {
+                        Button(action: { visionModel = "" }) {
+                            Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                        }.buttonStyle(.plain)
+                    }
+                }
+                Text("Must support vision/multimodal input. Shown with 👁 badge below.")
+                    .font(.caption2).foregroundStyle(.tertiary)
+            }
+
+            Divider()
+
+            // ── Text Model ───────────────────────────────────
             HStack {
-                Text("Model").font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
+                Text("Text Model").font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
                 Spacer()
                 if isLoading {
                     ProgressView().scaleEffect(0.65)
@@ -476,7 +608,12 @@ struct APIAndModelTab: View {
                     .onSubmit { if !customModel.isEmpty { model = customModel } }
             }
 
-            Text("Active: \(model)").font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Text model: \(model)")
+                    .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                Text("Vision model: \(visionModel.isEmpty ? model + " (same as text)" : visionModel)")
+                    .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+            }
         }
         .padding(4)
         .onAppear { loadCachedModels(); if fetchedModels.isEmpty { fetchModels() } }
@@ -902,26 +1039,55 @@ struct ModelRow: View {
     let isSelected: Bool
     let onSelect: () -> Void
 
+    private var metadata: TextProcessingService.ModelMetadata? {
+        TextProcessingService.metadata(for: id)
+    }
+
     var body: some View {
         Button(action: onSelect) {
-            HStack {
+            HStack(spacing: 6) {
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                     .foregroundStyle(isSelected ? .blue : .secondary)
                     .frame(width: 20)
 
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(label).fontWeight(isSelected ? .medium : .regular)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 4) {
+                        Text(label).fontWeight(isSelected ? .medium : .regular)
+                        // Vision badge
+                        if metadata?.supportsVision == true {
+                            Image(systemName: "eye.fill")
+                                .font(.system(size: 9))
+                                .foregroundStyle(.purple)
+                                .help("Supports vision/image input")
+                        }
+                        // Thinking badge
+                        if metadata?.notes == "thinking" {
+                            Image(systemName: "brain")
+                                .font(.system(size: 9))
+                                .foregroundStyle(.orange)
+                                .help("Supports extended thinking")
+                        }
+                    }
                     Text(id).font(.caption).foregroundStyle(.tertiary)
                 }
 
                 Spacer()
 
-                Text(note)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                // Pricing
+                if let meta = metadata,
+                   let inP = meta.inputPricePerMillion,
+                   let outP = meta.outputPricePerMillion {
+                    VStack(alignment: .trailing, spacing: 1) {
+                        Text("$\(String(format: "%.2f", inP))").font(.caption2).foregroundStyle(.secondary)
+                        Text("$\(String(format: "%.2f", outP))").font(.caption2).foregroundStyle(.secondary)
+                    }
+                    .help("Input / Output price per 1M tokens (USD)")
+                } else {
+                    Text(note).font(.caption).foregroundStyle(.secondary)
+                }
             }
             .padding(.horizontal, 12)
-            .padding(.vertical, 8)
+            .padding(.vertical, 6)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
