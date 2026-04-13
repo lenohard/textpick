@@ -1081,18 +1081,19 @@ struct HistorySettingsTab: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                List {
-                    ForEach(store.items) { item in
-                        HistoryRowView(item: item, formatter: dateFormatter)
+                ScrollView {
+                    LazyVStack(spacing: 10) {
+                        ForEach(store.items) { item in
+                            HistoryCard(item: item, formatter: dateFormatter)
+                        }
                     }
-                    .onDelete(perform: store.delete)
+                    .padding(12)
                 }
-                .listStyle(.inset)
 
                 Divider()
 
                 HStack {
-                    Text("\(store.items.count) items")
+                    Text("\(store.items.count) item\(store.items.count == 1 ? "" : "s")")
                         .font(.caption)
                         .foregroundStyle(.tertiary)
                     Spacer()
@@ -1106,120 +1107,5 @@ struct HistorySettingsTab: View {
                 .padding(.vertical, 8)
             }
         }
-    }
-}
-
-struct HistoryRowView: View {
-    let item: HistoryItem
-    let formatter: DateFormatter
-    @State private var promptExpanded = false
-    @State private var resultExpanded = true
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-
-            // ── Header: action · model · time ──────────────
-            HStack(spacing: 6) {
-                Label(item.actionName, systemImage: "bolt.fill")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.blue)
-                if !item.modelName.isEmpty {
-                    Text("·").foregroundStyle(.tertiary).font(.system(size: 10))
-                    Text(item.modelName)
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                }
-                Spacer()
-                Text(formatter.string(from: item.date))
-                    .font(.system(size: 10))
-                    .foregroundStyle(.tertiary)
-            }
-
-            // ── Prompt (collapsible, collapsed by default) ─
-            VStack(alignment: .leading, spacing: 2) {
-                Button(action: { withAnimation(.easeInOut(duration: 0.15)) { promptExpanded.toggle() } }) {
-                    HStack(spacing: 4) {
-                        Image(systemName: promptExpanded ? "chevron.down" : "chevron.right")
-                            .font(.system(size: 9, weight: .semibold))
-                        Text("Prompt")
-                            .font(.system(size: 10, weight: .semibold))
-                        if !promptExpanded {
-                            Text(item.fullPrompt.prefix(80).replacingOccurrences(of: "\n", with: " "))
-                                .font(.system(size: 10))
-                                .foregroundStyle(.tertiary)
-                                .lineLimit(1)
-                                .truncationMode(.tail)
-                        }
-                        Spacer()
-                        if promptExpanded {
-                            Button {
-                                NSPasteboard.general.clearContents()
-                                NSPasteboard.general.setString(item.fullPrompt, forType: .string)
-                            } label: {
-                                Image(systemName: "doc.on.doc").font(.system(size: 9))
-                            }
-                            .buttonStyle(.plain)
-                            .foregroundStyle(.secondary)
-                        }
-                    }
-                    .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-
-                if promptExpanded {
-                    Text(item.fullPrompt)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
-                        .padding(6)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color(NSColor.textBackgroundColor).opacity(0.5))
-                        .clipShape(RoundedRectangle(cornerRadius: 4))
-                }
-            }
-
-            Divider()
-
-            // ── Result (expanded by default) ───────────────
-            VStack(alignment: .leading, spacing: 2) {
-                Button(action: { withAnimation(.easeInOut(duration: 0.15)) { resultExpanded.toggle() } }) {
-                    HStack(spacing: 4) {
-                        Image(systemName: resultExpanded ? "chevron.down" : "chevron.right")
-                            .font(.system(size: 9, weight: .semibold))
-                        Text("Result")
-                            .font(.system(size: 10, weight: .semibold))
-                        if !resultExpanded {
-                            Text(item.result.prefix(80).replacingOccurrences(of: "\n", with: " "))
-                                .font(.system(size: 10))
-                                .foregroundStyle(.tertiary)
-                                .lineLimit(1)
-                                .truncationMode(.tail)
-                        }
-                        Spacer()
-                        if resultExpanded {
-                            Button {
-                                NSPasteboard.general.clearContents()
-                                NSPasteboard.general.setString(item.result, forType: .string)
-                            } label: {
-                                Image(systemName: "doc.on.doc").font(.system(size: 9))
-                            }
-                            .buttonStyle(.plain)
-                            .foregroundStyle(.blue)
-                        }
-                    }
-                    .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-
-                if resultExpanded {
-                    Text(item.result)
-                        .font(.system(size: 13))
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-            }
-        }
-        .padding(.vertical, 4)
     }
 }
