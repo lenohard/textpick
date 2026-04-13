@@ -1,0 +1,19 @@
+# Project-specific
+local/
+
+# macOS
+.DS_Store
+
+# Environment files
+.env
+*.env
+
+# Swift build artifacts
+.build/
+.swiftpm/
+*.xcodeproj
+DerivedData/
+
+# Logs
+*.log
+logs/
