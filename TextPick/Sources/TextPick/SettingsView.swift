@@ -11,11 +11,11 @@ struct SettingsView: View {
             APIAndModelTab()
                 .tabItem { Label("API & Model", systemImage: "cpu") }
 
-            HotkeySettingsTab()
-                .tabItem { Label("Hotkey", systemImage: "keyboard") }
-
             GeneralSettingsTab()
                 .tabItem { Label("General", systemImage: "slider.horizontal.3") }
+
+            HistorySettingsTab()
+                .tabItem { Label("History", systemImage: "clock.arrow.circlepath") }
         }
         .frame(width: 680, height: 520)
         .padding(16)
@@ -80,6 +80,7 @@ struct ActionsSettingsTab: View {
                     ActionEditor(action: action) { updated in
                         store.update(updated)
                     }
+                    .id(id)  // force re-init when selection changes
                 } else {
                     VStack {
                         Image(systemName: "arrow.left")
@@ -1022,5 +1023,121 @@ extension APISettingsTab.TestStatus: Equatable {
         case (.fail(let a), .fail(let b)): return a == b
         default: return false
         }
+    }
+}
+
+// MARK: - History Tab
+
+struct HistorySettingsTab: View {
+    @ObservedObject private var store = HistoryStore.shared
+
+    private let dateFormatter: DateFormatter = {
+        let df = DateFormatter()
+        df.dateStyle = .short
+        df.timeStyle = .short
+        return df
+    }()
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if store.items.isEmpty {
+                VStack(spacing: 12) {
+                    Image(systemName: "clock.arrow.circlepath")
+                        .font(.system(size: 36))
+                        .foregroundStyle(.tertiary)
+                    Text("No history yet")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    Text("Your requests and results will appear here.")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                List {
+                    ForEach(store.items) { item in
+                        HistoryRowView(item: item, formatter: dateFormatter)
+                    }
+                    .onDelete(perform: store.delete)
+                }
+                .listStyle(.inset)
+
+                Divider()
+
+                HStack {
+                    Text("\(store.items.count) items")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                    Spacer()
+                    Button("Clear All", role: .destructive) {
+                        store.clear()
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+            }
+        }
+    }
+}
+
+struct HistoryRowView: View {
+    let item: HistoryItem
+    let formatter: DateFormatter
+    @State private var isExpanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Label(item.actionName, systemImage: "bolt.fill")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.blue)
+                Spacer()
+                Text(formatter.string(from: item.date))
+                    .font(.system(size: 10))
+                    .foregroundStyle(.tertiary)
+            }
+
+            Text(item.sourceText)
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+
+            Divider()
+
+            if isExpanded {
+                Text(item.result)
+                    .font(.system(size: 13))
+                    .textSelection(.enabled)
+            } else {
+                Text(item.result)
+                    .font(.system(size: 13))
+                    .lineLimit(4)
+                    .truncationMode(.tail)
+            }
+
+            HStack(spacing: 12) {
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(item.result, forType: .string)
+                } label: {
+                    Label("Copy Result", systemImage: "doc.on.doc")
+                        .font(.system(size: 10))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.blue)
+
+                Spacer()
+
+                Button(isExpanded ? "Show Less" : "Show More") {
+                    withAnimation(.easeInOut(duration: 0.15)) { isExpanded.toggle() }
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 4)
     }
 }

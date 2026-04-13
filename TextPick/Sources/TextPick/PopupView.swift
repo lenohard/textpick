@@ -148,7 +148,7 @@ struct PopupView: View {
 
     private var actionButtonsView: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
+            HStack(spacing: 4) {
                 ForEach(enabledActions) { action in
                     ActionButton(
                         action: action,
@@ -159,9 +159,9 @@ struct PopupView: View {
                     }
                 }
             }
-            .padding(.horizontal, 10)
+            .padding(.horizontal, 8)
         }
-        .padding(.vertical, 6)
+        .padding(.vertical, 4)
     }
 
     // MARK: - Custom Prompt
@@ -212,6 +212,7 @@ struct PopupView: View {
                 result = output
                 isProcessing = false
                 contentMode = .result
+                HistoryStore.shared.add(sourceText: capturedText, actionName: action.label, result: output)
                 if autoCopy { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(output, forType: .string) }
             }
         }
@@ -230,6 +231,7 @@ struct PopupView: View {
                 result = output
                 isProcessing = false
                 contentMode = .result
+                HistoryStore.shared.add(sourceText: capturedText, actionName: "Custom: \(instruction)", result: output)
                 if autoCopy { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(output, forType: .string) }
             }
         }
@@ -246,7 +248,7 @@ struct ActionButton: View {
 
     var body: some View {
         Button(action: onTap) {
-            HStack(spacing: 4) {
+            HStack(spacing: 2) {
                 if isLoading {
                     ProgressView().scaleEffect(0.6)
                 } else {
@@ -254,8 +256,8 @@ struct ActionButton: View {
                 }
                 Text(action.label).font(.system(size: 11))
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
         }
         .buttonStyle(.bordered)
         .tint(isActive ? .blue : nil)

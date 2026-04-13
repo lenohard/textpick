@@ -17,11 +17,13 @@ Then grant **Accessibility permission** when prompted (System Settings → Priva
 | File | Purpose |
 |------|---------|
 | `TextPick/Sources/TextPick/main.swift` | Entry point — NSApplication setup |
-| `TextPick/Sources/TextPick/AppDelegate.swift` | Status bar icon, global hotkey wiring |
+| `TextPick/Sources/TextPick/AppDelegate.swift` | Status bar icon, main menu, global hotkey wiring |
 | `TextPick/Sources/TextPick/TextCaptureService.swift` | Selected text capture (AX API + clipboard fallback) |
 | `TextPick/Sources/TextPick/PopupWindowController.swift` | Floating NSPanel positioned near mouse cursor |
-| `TextPick/Sources/TextPick/PopupView.swift` | SwiftUI popup — action buttons, custom prompt, result view |
+| `TextPick/Sources/TextPick/PopupView.swift` | SwiftUI popup — action buttons, custom prompt, result view, history logging |
 | `TextPick/Sources/TextPick/TextProcessingService.swift` | LLM API client (OpenAI-compatible) |
+| `TextPick/Sources/TextPick/HistoryStore.swift` | Persistent history storage (max 100 items) |
+| `TextPick/Sources/TextPick/HistoryListView.swift` | History UI component |
 | `TextPick/Package.swift` | SPM config — depends on HotKey |
 
 ## Architecture
@@ -78,11 +80,16 @@ Set in `.env` (copy `env.example`):
 
 - **Accessibility** — to read selected text via AX API without clipboard disruption
 
+## Features
+
+- **Main Menu** — macOS-standard menu bar (App, Edit) for copy/paste shortcuts
+- **History** — Persistent storage of past requests/results (up to 100 items)
+- **Customizable Hotkey** — Configurable in Settings → General
+- **Model Override** — Model can be set via Settings (overrides .env)
+
 ## Known Limitations / Next Steps
 
 - [ ] Streaming responses (word-by-word output)
-- [ ] Settings panel (hotkey config, model picker, custom actions editor)
 - [ ] Launch at login (LaunchAgent)
 - [ ] Package as `.app` bundle
-- [ ] History of past captures
 - [ ] Some sandboxed/Electron apps may not expose text via AX API (clipboard fallback handles these)

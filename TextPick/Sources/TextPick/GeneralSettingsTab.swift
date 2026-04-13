@@ -20,6 +20,19 @@ struct GeneralSettingsTab: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
+                
+                // ── Hotkey ───────────────────────────────────────────
+                sectionHeader("Global Hotkey", icon: "keyboard")
+                    .padding(.bottom, 8)
+                
+                HotkeySettingsTab()
+                    .frame(minHeight: 250)
+                    .background(Color(NSColor.controlBackgroundColor).opacity(0.5))
+                    .cornerRadius(8)
+                    .padding(.horizontal, 4)
+                
+                sectionDivider()
+                    .padding(.top, 16)
 
                 // ── Appearance ───────────────────────────────────────
                 sectionHeader("Appearance", icon: "paintbrush")

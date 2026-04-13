@@ -25,8 +25,9 @@ actor TextProcessingService {
             ?? "https://ai-gateway.vercel.sh/v1"
     }
     var model: String {
-        ProcessInfo.processInfo.environment["TEXTPICK_MODEL"]
-            ?? UserDefaults.standard.string(forKey: "textpick.model")
+        // UserDefaults (Settings UI) takes priority over env var
+        UserDefaults.standard.string(forKey: "textpick.model")?.nilIfEmpty
+            ?? ProcessInfo.processInfo.environment["TEXTPICK_MODEL"]
             ?? "anthropic/claude-haiku-4.5"
     }
 
@@ -54,6 +55,9 @@ actor TextProcessingService {
     // MARK: - API Call (OpenAI-compatible)
 
     private func callAPI(system: String, user: String) async throws -> String {
+        guard !apiKey.isEmpty else {
+            throw APIError.missingAPIKey
+        }
         guard let url = URL(string: "\(baseURL)/chat/completions") else {
             throw APIError.invalidURL
         }
@@ -133,13 +137,15 @@ actor TextProcessingService {
         case invalidURL
         case invalidResponse
         case emptyInput
+        case missingAPIKey
         case httpError(Int, String)
 
         var errorDescription: String? {
             switch self {
-            case .invalidURL:              return "Invalid API URL"
+            case .invalidURL:              return "Invalid API URL — check Settings → API & Model"
             case .invalidResponse:         return "Invalid response from server"
             case .emptyInput:              return "No input provided"
+            case .missingAPIKey:           return "API key not set — open Settings → API & Model and paste your key"
             case .httpError(let c, let b): return "HTTP \(c): \(b.prefix(300))"
             }
         }
