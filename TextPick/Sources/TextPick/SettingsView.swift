@@ -20,7 +20,7 @@ struct SettingsView: View {
             HistorySettingsTab()
                 .tabItem { Label("History", systemImage: "clock.arrow.circlepath") }
         }
-        .frame(width: 680, height: 540)
+        .frame(width: 720, height: 580)
         .padding(16)
     }
 }
@@ -153,6 +153,9 @@ struct ActionEditor: View {
     @State private var icon: String
     @State private var prompt: String
     @State private var isEnabled: Bool
+    @State private var saveToFile: Bool
+    @State private var saveDirectory: String
+    @State private var filenameFormat: FilenameFormat
 
     // Common SF Symbols for text actions
     private let iconOptions = [
@@ -167,15 +170,21 @@ struct ActionEditor: View {
         self.action = action
         self.isVision = isVision
         self.onSave = onSave
-        _label   = State(initialValue: action.label)
-        _icon    = State(initialValue: action.icon)
-        _prompt  = State(initialValue: action.prompt)
-        _isEnabled = State(initialValue: action.isEnabled)
+        _label         = State(initialValue: action.label)
+        _icon          = State(initialValue: action.icon)
+        _prompt        = State(initialValue: action.prompt)
+        _isEnabled     = State(initialValue: action.isEnabled)
+        _saveToFile    = State(initialValue: action.saveToFile)
+        _saveDirectory = State(initialValue: action.saveDirectory)
+        _filenameFormat = State(initialValue: action.filenameFormat)
     }
 
     var isDirty: Bool {
         label != action.label || icon != action.icon
             || prompt != action.prompt || isEnabled != action.isEnabled
+            || saveToFile != action.saveToFile
+            || saveDirectory != action.saveDirectory
+            || filenameFormat != action.filenameFormat
     }
 
     var body: some View {
@@ -230,6 +239,63 @@ struct ActionEditor: View {
                     .border(Color.secondary.opacity(0.3), width: 1)
             }
 
+            // Save-to-file (vision actions only)
+            if isVision {
+                Divider()
+                VStack(alignment: .leading, spacing: 8) {
+                    Toggle("Save result to file", isOn: $saveToFile)
+                        .font(.system(size: 13))
+
+                    if saveToFile {
+                        VStack(alignment: .leading, spacing: 8) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Save directory").font(.caption).foregroundStyle(.secondary)
+                                HStack(spacing: 6) {
+                                    TextField("~/Pictures/TextPick", text: $saveDirectory)
+                                        .textFieldStyle(.roundedBorder)
+                                    Button("Browse…") {
+                                        let panel = NSOpenPanel()
+                                        panel.canChooseFiles = false
+                                        panel.canChooseDirectories = true
+                                        panel.canCreateDirectories = true
+                                        panel.prompt = "Select"
+                                        if panel.runModal() == .OK, let url = panel.url {
+                                            saveDirectory = url.path
+                                        }
+                                    }
+                                    .controlSize(.small)
+                                }
+                            }
+
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Filename format").font(.caption).foregroundStyle(.secondary)
+                                Picker("", selection: $filenameFormat) {
+                                    ForEach(FilenameFormat.allCases, id: \.self) { fmt in
+                                        Text(fmt.displayName).tag(fmt)
+                                    }
+                                }
+                                .labelsHidden()
+                                .fixedSize()
+                            }
+
+                            let previewDir = saveDirectory.isEmpty ? "~/Pictures/TextPick" : saveDirectory
+                            let previewName: String = {
+                                switch filenameFormat {
+                                case .descriptionOnly:      return "<description>.md"
+                                case .timestampOnly:        return "2024-01-15_14-30-00.md"
+                                case .timestampDescription: return "2024-01-15_14-30-00_<description>.md"
+                                }
+                            }()
+                            Text("Preview: \(previewDir)/\(previewName)")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                    }
+                }
+            }
+
             // Save button
             HStack {
                 Spacer()
@@ -239,6 +305,9 @@ struct ActionEditor: View {
                     updated.icon = icon
                     updated.prompt = prompt
                     updated.isEnabled = isEnabled
+                    updated.saveToFile = saveToFile
+                    updated.saveDirectory = saveDirectory
+                    updated.filenameFormat = filenameFormat
                     onSave(updated)
                 }
                 .buttonStyle(.borderedProminent)
@@ -252,6 +321,9 @@ struct ActionEditor: View {
             icon = action.icon
             prompt = action.prompt
             isEnabled = action.isEnabled
+            saveToFile = action.saveToFile
+            saveDirectory = action.saveDirectory
+            filenameFormat = action.filenameFormat
         }
     }
 }
@@ -859,21 +931,21 @@ struct HotkeySettingsTab: View {
                     .foregroundStyle(.secondary)
 
                 Text(config.displayString)
-                    .font(.system(size: 40, weight: .semibold, design: .rounded))
-                    .tracking(3)
-                    .padding(.horizontal, 32)
-                    .padding(.vertical, 16)
+                    .font(.system(size: 22, weight: .semibold, design: .rounded))
+                    .tracking(2)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
                     .background(
-                        RoundedRectangle(cornerRadius: 16)
+                        RoundedRectangle(cornerRadius: 10)
                             .fill(Color.accentColor.opacity(0.09))
                             .overlay(
-                                RoundedRectangle(cornerRadius: 16)
+                                RoundedRectangle(cornerRadius: 10)
                                     .stroke(Color.accentColor.opacity(0.22), lineWidth: 1)
                             )
                     )
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 28)
+            .padding(.vertical, 12)
 
             Divider()
 

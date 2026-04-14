@@ -22,6 +22,8 @@ struct PopupView: View {
     @State private var isProcessing: Bool = false
     @State private var activeActionID: UUID? = nil
     @State private var customPrompt: String = ""
+    @State private var savedFilePath: URL? = nil
+    @State private var saveError: String? = nil
 
     // Which content is shown in the shared text region
     private enum ContentMode { case input, result }
@@ -183,6 +185,22 @@ struct PopupView: View {
 
                         HStack {
                             Spacer()
+                            if let savedURL = savedFilePath {
+                                Button {
+                                    NSWorkspace.shared.activateFileViewerSelecting([savedURL])
+                                } label: {
+                                    Label("Show in Finder", systemImage: "folder")
+                                        .font(.caption)
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.mini)
+                                .tint(.green)
+                            }
+                            if let errMsg = saveError {
+                                Text(errMsg)
+                                    .font(.caption)
+                                    .foregroundStyle(.red)
+                            }
                             Button {
                                 NSPasteboard.general.clearContents()
                                 NSPasteboard.general.setString(result, forType: .string)
@@ -332,6 +350,8 @@ struct PopupView: View {
         activeActionID = action.id
         isProcessing = true
         result = ""
+        savedFilePath = nil
+        saveError = nil
         if switchToResult { contentMode = .result }
         Task {
             let output = await TextProcessingService.shared.processImage(imageData: data, prompt: action.prompt)
@@ -342,7 +362,69 @@ struct PopupView: View {
                 contentMode = .result
                 HistoryStore.shared.add(sourceText: "[Image]", actionName: action.label, fullPrompt: action.prompt, result: output, modelName: usedModel)
                 if autoCopy { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(output, forType: .string) }
+                if action.saveToFile {
+                    switch saveResultToFile(result: output, action: action) {
+                    case .success(let url): savedFilePath = url
+                    case .failure(let err): saveError = "Save failed: \(err.localizedDescription)"
+                    }
+                }
             }
+        }
+    }
+
+    // MARK: - File Save Helper
+
+    private func saveResultToFile(result: String, action: TextAction) -> Result<URL, Error> {
+        // Resolve save directory
+        let dirPath = action.saveDirectory.isEmpty
+            ? (NSString(string: "~/Pictures/TextPick").expandingTildeInPath)
+            : (NSString(string: action.saveDirectory).expandingTildeInPath)
+        let dirURL = URL(fileURLWithPath: dirPath)
+
+        do {
+            try FileManager.default.createDirectory(at: dirURL, withIntermediateDirectories: true)
+        } catch {
+            return .failure(error)
+        }
+
+        // Build filename
+        let timestamp: String = {
+            let fmt = DateFormatter()
+            fmt.dateFormat = "yyyy-MM-dd_HH-mm-ss"
+            return fmt.string(from: Date())
+        }()
+
+        let descriptionPart: String = {
+            // First non-empty line of result, max 60 chars, sanitized
+            let firstLine = result.components(separatedBy: .newlines)
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .first(where: { !$0.isEmpty }) ?? "untitled"
+            let truncated = String(firstLine.prefix(60))
+            // Remove chars invalid in filenames
+            let invalid = CharacterSet(charactersIn: "/\\:*?\"<>|")
+            return truncated.components(separatedBy: invalid).joined(separator: "-")
+        }()
+
+        let baseName: String
+        switch action.filenameFormat {
+        case .descriptionOnly:      baseName = descriptionPart
+        case .timestampOnly:        baseName = timestamp
+        case .timestampDescription: baseName = "\(timestamp)_\(descriptionPart)"
+        }
+
+        var fileURL = dirURL.appendingPathComponent(baseName).appendingPathExtension("md")
+        // Avoid overwrite — append counter if needed
+        var counter = 1
+        while FileManager.default.fileExists(atPath: fileURL.path) {
+            fileURL = dirURL.appendingPathComponent("\(baseName)_\(counter)").appendingPathExtension("md")
+            counter += 1
+        }
+
+        do {
+            try result.write(to: fileURL, atomically: true, encoding: .utf8)
+            return .success(fileURL)
+        } catch {
+            return .failure(error)
         }
     }
 

@@ -26,7 +26,7 @@ struct GeneralSettingsTab: View {
                     .padding(.bottom, 8)
                 
                 HotkeySettingsTab()
-                    .frame(minHeight: 250)
+                    .frame(minHeight: 160)
                     .background(Color(NSColor.controlBackgroundColor).opacity(0.5))
                     .cornerRadius(8)
                     .padding(.horizontal, 4)

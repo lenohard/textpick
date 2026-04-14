@@ -3,6 +3,20 @@ import AppKit
 
 // MARK: - Model
 
+enum FilenameFormat: String, Codable, CaseIterable {
+    case descriptionOnly      = "description"
+    case timestampOnly        = "timestamp"
+    case timestampDescription = "timestamp-description"
+
+    var displayName: String {
+        switch self {
+        case .descriptionOnly:      return "Description only"
+        case .timestampOnly:        return "Timestamp only"
+        case .timestampDescription: return "Timestamp + description"
+        }
+    }
+}
+
 struct TextAction: Identifiable, Codable, Equatable {
     var id: UUID = UUID()
     var label: String
@@ -12,6 +26,14 @@ struct TextAction: Identifiable, Codable, Equatable {
     /// When true, this action appears in image mode (vision tasks)
     var supportsImage: Bool = false
 
+    // MARK: - Save-to-file (vision actions)
+    /// When true, result is saved to disk after processing
+    var saveToFile: Bool = false
+    /// Directory to save results (default: ~/Pictures/TextPick)
+    var saveDirectory: String = ""
+    /// How to name the saved file
+    var filenameFormat: FilenameFormat = .timestampDescription
+
     /// Renders the final prompt by substituting {{text}} with the captured text.
     /// If the prompt contains no placeholder, the captured text is appended.
     func renderPrompt(with text: String) -> String {
@@ -19,6 +41,23 @@ struct TextAction: Identifiable, Codable, Equatable {
             return prompt.replacingOccurrences(of: "{{text}}", with: text)
         }
         return prompt + "\n\n" + text
+    }
+}
+
+// MARK: - Backward-compatible Decodable
+
+extension TextAction {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id             = try c.decodeIfPresent(UUID.self,           forKey: .id)             ?? UUID()
+        label          = try c.decode(String.self,                  forKey: .label)
+        icon           = try c.decode(String.self,                  forKey: .icon)
+        prompt         = try c.decode(String.self,                  forKey: .prompt)
+        isEnabled      = try c.decodeIfPresent(Bool.self,           forKey: .isEnabled)      ?? true
+        supportsImage  = try c.decodeIfPresent(Bool.self,           forKey: .supportsImage)  ?? false
+        saveToFile     = try c.decodeIfPresent(Bool.self,           forKey: .saveToFile)     ?? false
+        saveDirectory  = try c.decodeIfPresent(String.self,        forKey: .saveDirectory)  ?? ""
+        filenameFormat = try c.decodeIfPresent(FilenameFormat.self, forKey: .filenameFormat) ?? .timestampDescription
     }
 }
 
@@ -37,7 +76,10 @@ extension TextAction {
             label: "Describe",
             icon: "eye",
             prompt: "Describe this image in detail. What do you see? Include objects, people, text, colors, layout, and any notable details.",
-            supportsImage: true
+            supportsImage: true,
+            saveToFile: false,
+            saveDirectory: "",
+            filenameFormat: .timestampDescription
         ),
         TextAction(
             label: "Ask",

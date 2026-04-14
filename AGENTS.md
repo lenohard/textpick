@@ -24,6 +24,8 @@ Then grant **Accessibility permission** when prompted (System Settings → Priva
 | `TextPick/Sources/TextPick/TextProcessingService.swift` | LLM API client (OpenAI-compatible) |
 | `TextPick/Sources/TextPick/HistoryStore.swift` | Persistent history storage (max 100 items) |
 | `TextPick/Sources/TextPick/HistoryListView.swift` | History UI component |
+| `TextPick/Sources/TextPick/ActionsStore.swift` | Text & vision action definitions + CRUD + persistence |
+| `TextPick/Sources/TextPick/SettingsView.swift` | Settings UI, ActionEditor, HotkeySettingsTab |
 | `TextPick/Package.swift` | SPM config — depends on HotKey |
 
 ## Architecture
@@ -34,15 +36,16 @@ Global Hotkey ⌘⇧Space (HotKey lib)
         ▼
 TextCaptureService
   ├── Primary:  AXUIElement.kAXSelectedTextAttribute (no clipboard disruption)
-  └── Fallback: simulate ⌘C → read NSPasteboard → restore clipboard
+  └── Fallback: simulate ⌘C → read NSPasteboard → restore clipboard + image
         │
         ▼
 PopupWindowController (NSPanel, .floating level, .nonactivatingPanel)
   └── PopupView (SwiftUI)
-        ├── Captured text preview
-        ├── Action buttons: Summarize / Translate / Explain / Fix Grammar
+        ├── Mode: text OR image (clipboard screenshot)
+        ├── Text: Action buttons (Format/Explain/Fix/Answer/Translate)
+        ├── Image: Vision action buttons (OCR/Describe/Ask/Translate/Summarize)
         ├── Custom prompt input
-        └── Result area (scrollable, selectable, copy button)
+        └── Result area (scrollable, selectable, copy, show-in-finder)
               │
               ▼
         TextProcessingService
@@ -86,8 +89,11 @@ Set in `.env` (copy `env.example`):
 - **History** — Persistent storage of past requests/results (up to 100 items), now stores full prompts and model info
 - **Customizable Hotkey** — Configurable in Settings → General
 - **Model Override** — Model can be set via Settings (overrides .env)
+- **Vision Actions** — OCR, describe, translate, summarize images from clipboard. Each vision action is configurable: prompt, icon, enabled state.
+- **Save Result to File** — Vision actions can auto-save LLM result to disk. Configurable: save directory (default `~/Pictures/TextPick`), filename format (description / timestamp / timestamp+description). After save, "Show in Finder" button appears.
 - **Test Connection** — Built-in API connectivity test in Settings → API & Model
 - **Enhanced Debug Logging** — API key/URL validation and request tracing for troubleshooting
+- **Settings Persistence Fix** — Custom `Decodable` init for `TextAction` uses `decodeIfPresent` to tolerate missing new fields in old saved data (backward compat)
 
 ## Known Limitations / Next Steps
 
