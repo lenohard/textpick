@@ -178,38 +178,40 @@ actor TextProcessingService {
         let supportsVision: Bool
         let inputPricePerMillion: Double?   // USD per 1M input tokens
         let outputPricePerMillion: Double?  // USD per 1M output tokens
+        let contextWindowTokens: Int?
+        let maxOutputTokens: Int?
         let notes: String?
     }
 
     /// Hardcoded metadata for known models. Vision capability and pricing.
     static let modelMetadataTable: [String: ModelMetadata] = [
         // Anthropic
-        "anthropic/claude-haiku-4-5":         ModelMetadata(supportsVision: true,  inputPricePerMillion: 0.80,  outputPricePerMillion: 4.00,   notes: nil),
-        "anthropic/claude-haiku-4.5":         ModelMetadata(supportsVision: true,  inputPricePerMillion: 0.80,  outputPricePerMillion: 4.00,   notes: nil),
-        "anthropic/claude-sonnet-4-5":        ModelMetadata(supportsVision: true,  inputPricePerMillion: 3.00,  outputPricePerMillion: 15.00,  notes: nil),
-        "anthropic/claude-sonnet-4.5":        ModelMetadata(supportsVision: true,  inputPricePerMillion: 3.00,  outputPricePerMillion: 15.00,  notes: nil),
-        "anthropic/claude-sonnet-4-6":        ModelMetadata(supportsVision: true,  inputPricePerMillion: 3.00,  outputPricePerMillion: 15.00,  notes: nil),
-        "anthropic/claude-opus-4-5":          ModelMetadata(supportsVision: true,  inputPricePerMillion: 15.00, outputPricePerMillion: 75.00,  notes: nil),
-        "anthropic/claude-3-5-haiku-20241022":ModelMetadata(supportsVision: true,  inputPricePerMillion: 0.80,  outputPricePerMillion: 4.00,   notes: nil),
-        "anthropic/claude-3-5-sonnet-20241022":ModelMetadata(supportsVision: true, inputPricePerMillion: 3.00,  outputPricePerMillion: 15.00,  notes: nil),
+        "anthropic/claude-haiku-4-5":          ModelMetadata(supportsVision: true,  inputPricePerMillion: 0.80,  outputPricePerMillion: 4.00,   contextWindowTokens: 200_000, maxOutputTokens: 8_192,  notes: nil),
+        "anthropic/claude-haiku-4.5":          ModelMetadata(supportsVision: true,  inputPricePerMillion: 0.80,  outputPricePerMillion: 4.00,   contextWindowTokens: 200_000, maxOutputTokens: 8_192,  notes: nil),
+        "anthropic/claude-sonnet-4-5":         ModelMetadata(supportsVision: true,  inputPricePerMillion: 3.00,  outputPricePerMillion: 15.00,  contextWindowTokens: 200_000, maxOutputTokens: 8_192,  notes: nil),
+        "anthropic/claude-sonnet-4.5":         ModelMetadata(supportsVision: true,  inputPricePerMillion: 3.00,  outputPricePerMillion: 15.00,  contextWindowTokens: 200_000, maxOutputTokens: 8_192,  notes: nil),
+        "anthropic/claude-sonnet-4-6":         ModelMetadata(supportsVision: true,  inputPricePerMillion: 3.00,  outputPricePerMillion: 15.00,  contextWindowTokens: 200_000, maxOutputTokens: 8_192,  notes: nil),
+        "anthropic/claude-opus-4-5":           ModelMetadata(supportsVision: true,  inputPricePerMillion: 15.00, outputPricePerMillion: 75.00,  contextWindowTokens: 200_000, maxOutputTokens: 32_000, notes: nil),
+        "anthropic/claude-3-5-haiku-20241022": ModelMetadata(supportsVision: true,  inputPricePerMillion: 0.80,  outputPricePerMillion: 4.00,   contextWindowTokens: 200_000, maxOutputTokens: 8_192,  notes: nil),
+        "anthropic/claude-3-5-sonnet-20241022":ModelMetadata(supportsVision: true,  inputPricePerMillion: 3.00,  outputPricePerMillion: 15.00,  contextWindowTokens: 200_000, maxOutputTokens: 8_192,  notes: nil),
         // OpenAI
-        "openai/gpt-4o":                      ModelMetadata(supportsVision: true,  inputPricePerMillion: 2.50,  outputPricePerMillion: 10.00,  notes: nil),
-        "openai/gpt-4o-mini":                 ModelMetadata(supportsVision: true,  inputPricePerMillion: 0.15,  outputPricePerMillion: 0.60,   notes: nil),
-        "openai/gpt-4.1":                     ModelMetadata(supportsVision: true,  inputPricePerMillion: 2.00,  outputPricePerMillion: 8.00,   notes: nil),
-        "openai/gpt-4.1-mini":                ModelMetadata(supportsVision: true,  inputPricePerMillion: 0.40,  outputPricePerMillion: 1.60,   notes: nil),
-        "openai/gpt-4.1-nano":                ModelMetadata(supportsVision: true,  inputPricePerMillion: 0.10,  outputPricePerMillion: 0.40,   notes: nil),
-        "openai/gpt-5-nano":                  ModelMetadata(supportsVision: true,  inputPricePerMillion: 0.10,  outputPricePerMillion: 0.40,   notes: nil),
-        "openai/o4-mini":                     ModelMetadata(supportsVision: true,  inputPricePerMillion: 1.10,  outputPricePerMillion: 4.40,   notes: "thinking"),
-        "openai/o3":                          ModelMetadata(supportsVision: true,  inputPricePerMillion: 10.00, outputPricePerMillion: 40.00,  notes: "thinking"),
+        "openai/gpt-4o":                       ModelMetadata(supportsVision: true,  inputPricePerMillion: 2.50,  outputPricePerMillion: 10.00,  contextWindowTokens: 128_000, maxOutputTokens: 16_384, notes: nil),
+        "openai/gpt-4o-mini":                  ModelMetadata(supportsVision: true,  inputPricePerMillion: 0.15,  outputPricePerMillion: 0.60,   contextWindowTokens: 128_000, maxOutputTokens: 16_384, notes: nil),
+        "openai/gpt-4.1":                      ModelMetadata(supportsVision: true,  inputPricePerMillion: 2.00,  outputPricePerMillion: 8.00,   contextWindowTokens: 1_000_000, maxOutputTokens: 32_768, notes: nil),
+        "openai/gpt-4.1-mini":                 ModelMetadata(supportsVision: true,  inputPricePerMillion: 0.40,  outputPricePerMillion: 1.60,   contextWindowTokens: 1_000_000, maxOutputTokens: 32_768, notes: nil),
+        "openai/gpt-4.1-nano":                 ModelMetadata(supportsVision: true,  inputPricePerMillion: 0.10,  outputPricePerMillion: 0.40,   contextWindowTokens: 1_000_000, maxOutputTokens: 32_768, notes: nil),
+        "openai/gpt-5-nano":                   ModelMetadata(supportsVision: true,  inputPricePerMillion: 0.10,  outputPricePerMillion: 0.40,   contextWindowTokens: 400_000, maxOutputTokens: 128_000, notes: nil),
+        "openai/o4-mini":                      ModelMetadata(supportsVision: true,  inputPricePerMillion: 1.10,  outputPricePerMillion: 4.40,   contextWindowTokens: 200_000, maxOutputTokens: 100_000, notes: "thinking"),
+        "openai/o3":                           ModelMetadata(supportsVision: true,  inputPricePerMillion: 10.00, outputPricePerMillion: 40.00,  contextWindowTokens: 200_000, maxOutputTokens: 100_000, notes: "thinking"),
         // Google
-        "google/gemini-2.0-flash":            ModelMetadata(supportsVision: true,  inputPricePerMillion: 0.10,  outputPricePerMillion: 0.40,   notes: nil),
-        "google/gemini-2.0-flash-lite":       ModelMetadata(supportsVision: true,  inputPricePerMillion: 0.075, outputPricePerMillion: 0.30,   notes: nil),
-        "google/gemini-2.5-flash":            ModelMetadata(supportsVision: true,  inputPricePerMillion: 0.15,  outputPricePerMillion: 0.60,   notes: nil),
-        "google/gemini-2.5-pro":              ModelMetadata(supportsVision: true,  inputPricePerMillion: 1.25,  outputPricePerMillion: 10.00,  notes: "thinking"),
-        "google/gemini-3-flash":              ModelMetadata(supportsVision: true,  inputPricePerMillion: 0.15,  outputPricePerMillion: 0.60,   notes: nil),
+        "google/gemini-2.0-flash":             ModelMetadata(supportsVision: true,  inputPricePerMillion: 0.10,  outputPricePerMillion: 0.40,   contextWindowTokens: 1_000_000, maxOutputTokens: 8_192,  notes: nil),
+        "google/gemini-2.0-flash-lite":        ModelMetadata(supportsVision: true,  inputPricePerMillion: 0.075, outputPricePerMillion: 0.30,   contextWindowTokens: 1_000_000, maxOutputTokens: 8_192,  notes: nil),
+        "google/gemini-2.5-flash":             ModelMetadata(supportsVision: true,  inputPricePerMillion: 0.15,  outputPricePerMillion: 0.60,   contextWindowTokens: 1_000_000, maxOutputTokens: 65_536, notes: nil),
+        "google/gemini-2.5-pro":               ModelMetadata(supportsVision: true,  inputPricePerMillion: 1.25,  outputPricePerMillion: 10.00,  contextWindowTokens: 1_000_000, maxOutputTokens: 65_536, notes: "thinking"),
+        "google/gemini-3-flash":               ModelMetadata(supportsVision: true,  inputPricePerMillion: 0.15,  outputPricePerMillion: 0.60,   contextWindowTokens: 1_000_000, maxOutputTokens: 65_536, notes: nil),
         // DeepSeek
-        "deepseek/deepseek-chat":             ModelMetadata(supportsVision: false, inputPricePerMillion: 0.27,  outputPricePerMillion: 1.10,   notes: nil),
-        "deepseek/deepseek-r1":               ModelMetadata(supportsVision: false, inputPricePerMillion: 0.55,  outputPricePerMillion: 2.19,   notes: "thinking"),
+        "deepseek/deepseek-chat":              ModelMetadata(supportsVision: false, inputPricePerMillion: 0.27,  outputPricePerMillion: 1.10,   contextWindowTokens: 64_000,  maxOutputTokens: 8_192,  notes: nil),
+        "deepseek/deepseek-r1":                ModelMetadata(supportsVision: false, inputPricePerMillion: 0.55,  outputPricePerMillion: 2.19,   contextWindowTokens: 64_000,  maxOutputTokens: 8_192,  notes: "thinking"),
     ]
 
     static func metadata(for modelID: String) -> ModelMetadata? {

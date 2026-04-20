@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import MarkdownUI
 
 // MARK: - Main Popup View
 
@@ -19,11 +20,13 @@ struct PopupView: View {
     @AppStorage("textpick.closeOnEsc")      private var closeOnEsc:     Bool   = true
 
     @State private var result: String = ""
+    @State private var renderMarkdown: Bool = true
     @State private var isProcessing: Bool = false
     @State private var activeActionID: UUID? = nil
     @State private var customPrompt: String = ""
     @State private var savedFilePath: URL? = nil
     @State private var saveError: String? = nil
+    @State private var copyFeedback: Bool = false
 
     // Which content is shown in the shared text region
     private enum ContentMode { case input, result }
@@ -71,6 +74,12 @@ struct PopupView: View {
             RoundedRectangle(cornerRadius: 12)
                 .stroke(Color.primary.opacity(0.1), lineWidth: 1)
         )
+        .onAppear {
+            setupKeyCopyMonitor()
+        }
+        .onDisappear {
+            removeKeyCopyMonitor()
+        }
     }
 
     // MARK: - Header
@@ -101,6 +110,29 @@ struct PopupView: View {
                 .pickerStyle(.segmented)
                 .frame(width: 120)
                 .labelsHidden()
+            }
+
+            // Copy button — visible only when result is available
+            if contentMode == .result && !result.isEmpty {
+                Button(action: copyResult) {
+                    ZStack {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(.green)
+                            .opacity(copyFeedback ? 1 : 0)
+                            .scaleEffect(copyFeedback ? 1 : 0.5)
+
+                        Image(systemName: "doc.on.doc")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                            .opacity(copyFeedback ? 0 : 1)
+                            .scaleEffect(copyFeedback ? 0.5 : 1)
+                    }
+                    .frame(width: 16, height: 16)
+                    .animation(.spring(duration: 0.2), value: copyFeedback)
+                }
+                .buttonStyle(.plain)
+                .help("Copy result (C)")
             }
 
             // Pin button
@@ -177,11 +209,8 @@ struct PopupView: View {
             } else if !result.isEmpty {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text(result)
-                            .font(.system(size: CGFloat(fontSize)))
-                            .lineSpacing(3)
+                        resultBodyView
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .textSelection(.enabled)
 
                         HStack {
                             Spacer()
@@ -201,15 +230,6 @@ struct PopupView: View {
                                     .font(.caption)
                                     .foregroundStyle(.red)
                             }
-                            Button {
-                                NSPasteboard.general.clearContents()
-                                NSPasteboard.general.setString(result, forType: .string)
-                            } label: {
-                                Label("Copy", systemImage: "doc.on.doc")
-                                    .font(.caption)
-                            }
-                            .buttonStyle(.bordered)
-                            .controlSize(.mini)
                         }
                     }
                     .padding(12)
@@ -218,6 +238,21 @@ struct PopupView: View {
             } else {
                 Color.clear
             }
+        }
+    }
+
+    @ViewBuilder
+    private var resultBodyView: some View {
+        if renderMarkdown {
+            Markdown(result)
+                .markdownTheme(.gitHub)
+                .textSelection(.enabled)
+                .font(.system(size: CGFloat(fontSize)))
+        } else {
+            Text(result)
+                .font(.system(size: CGFloat(fontSize)))
+                .lineSpacing(3)
+                .textSelection(.enabled)
         }
     }
 
@@ -299,6 +334,41 @@ struct PopupView: View {
 
     private var canSubmitCustom: Bool {
         !customPrompt.trimmingCharacters(in: .whitespaces).isEmpty && !isProcessing
+    }
+
+    // MARK: - Key Monitor
+
+    @State private var keyCopyMonitor: Any? = nil
+
+    private func setupKeyCopyMonitor() {
+        removeKeyCopyMonitor()
+        keyCopyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            // 'c' keyCode == 8, no modifier keys
+            if event.keyCode == 8
+                && event.modifierFlags.intersection([.command, .option, .control, .shift]).isEmpty
+                && self.contentMode == .result
+                && !self.result.isEmpty {
+                self.copyResult()
+                return nil  // consume event
+            }
+            return event
+        }
+    }
+
+    private func removeKeyCopyMonitor() {
+        if let m = keyCopyMonitor { NSEvent.removeMonitor(m); keyCopyMonitor = nil }
+    }
+
+    // MARK: - Copy Helper
+
+    private func copyResult() {
+        guard !result.isEmpty else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(result, forType: .string)
+        withAnimation(.spring(duration: 0.2)) { copyFeedback = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+            withAnimation(.spring(duration: 0.2)) { copyFeedback = false }
+        }
     }
 
     // MARK: - Handlers (text)

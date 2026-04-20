@@ -20,13 +20,13 @@ Then grant **Accessibility permission** when prompted (System Settings → Priva
 | `TextPick/Sources/TextPick/AppDelegate.swift` | Status bar icon, main menu, global hotkey wiring |
 | `TextPick/Sources/TextPick/TextCaptureService.swift` | Selected text capture (AX API + clipboard fallback) |
 | `TextPick/Sources/TextPick/PopupWindowController.swift` | Floating NSPanel positioned near mouse cursor |
-| `TextPick/Sources/TextPick/PopupView.swift` | SwiftUI popup — action buttons, custom prompt, result view, history logging |
-| `TextPick/Sources/TextPick/TextProcessingService.swift` | LLM API client (OpenAI-compatible) |
+| `TextPick/Sources/TextPick/PopupView.swift` | SwiftUI popup — action buttons, custom prompt, Markdown/plain result rendering, history logging |
+| `TextPick/Sources/TextPick/TextProcessingService.swift` | LLM API client (OpenAI-compatible) + local model metadata for pricing/capabilities/context |
 | `TextPick/Sources/TextPick/HistoryStore.swift` | Persistent history storage (max 100 items) |
 | `TextPick/Sources/TextPick/HistoryListView.swift` | History UI component |
 | `TextPick/Sources/TextPick/ActionsStore.swift` | Text & vision action definitions + CRUD + persistence |
-| `TextPick/Sources/TextPick/SettingsView.swift` | Settings UI, ActionEditor, HotkeySettingsTab |
-| `TextPick/Package.swift` | SPM config — depends on HotKey |
+| `TextPick/Sources/TextPick/SettingsView.swift` | Settings UI, action editors, API config, model browser/selection, hotkey UI |
+| `TextPick/Package.swift` | SPM config — depends on HotKey and MarkdownUI |
 
 ## Architecture
 
@@ -88,11 +88,13 @@ Set in `.env` (copy `env.example`):
 - **Main Menu** — macOS-standard menu bar (App, Edit) for copy/paste shortcuts
 - **History** — Persistent storage of past requests/results (up to 100 items), now stores full prompts and model info
 - **Customizable Hotkey** — Configurable in Settings → General
-- **Model Override** — Model can be set via Settings (overrides .env)
+- **Markdown Result Rendering** — Result panel supports Markdown rendering, with plain text fallback path still in code
+- **Model Browser** — Settings → API & Model includes searchable/filterable model list for browsing metadata, not only direct selection
+- **Separate Text/Vision Model Selection** — Text model and vision model have independent selection areas; vision model can fall back to text model when empty
+- **Model Metadata Display** — Model list shows model ID, provider, vision/thinking badges, pricing, context window, max output, and supports copying model ID
 - **Vision Actions** — OCR, describe, translate, summarize images from clipboard. Each vision action is configurable: prompt, icon, enabled state.
 - **Save Result to File** — Vision actions can auto-save LLM result to disk. Configurable: save directory (default `~/Pictures/TextPick`), filename format (description / timestamp / timestamp+description). After save, "Show in Finder" button appears.
 - **Test Connection** — Built-in API connectivity test in Settings → API & Model
-- **Enhanced Debug Logging** — API key/URL validation and request tracing for troubleshooting
 - **Settings Persistence Fix** — Custom `Decodable` init for `TextAction` uses `decodeIfPresent` to tolerate missing new fields in old saved data (backward compat)
 
 ## Known Limitations / Next Steps
@@ -101,4 +103,5 @@ Set in `.env` (copy `env.example`):
 - [ ] Launch at login (LaunchAgent)
 - [ ] Package as `.app` bundle
 - [ ] Some sandboxed/Electron apps may not expose text via AX API (clipboard fallback handles these)
-- [ ] Enhanced model selection with caching and search
+- [ ] Replace hardcoded model metadata with provider/gateway metadata when available
+- [ ] Remove sensitive debug logging in `TextProcessingService.swift` (currently prints API key prefix / auth debug info)
