@@ -1,6 +1,5 @@
 import SwiftUI
 import AppKit
-import MarkdownUI
 
 // MARK: - Main Popup View
 
@@ -20,7 +19,6 @@ struct PopupView: View {
     @AppStorage("textpick.closeOnEsc")      private var closeOnEsc:     Bool   = true
 
     @State private var result: String = ""
-    @State private var renderMarkdown: Bool = true
     @State private var isProcessing: Bool = false
     @State private var activeActionID: UUID? = nil
     @State private var customPrompt: String = ""
@@ -243,17 +241,10 @@ struct PopupView: View {
 
     @ViewBuilder
     private var resultBodyView: some View {
-        if renderMarkdown {
-            Markdown(result)
-                .markdownTheme(.gitHub)
-                .textSelection(.enabled)
-                .font(.system(size: CGFloat(fontSize)))
-        } else {
-            Text(result)
-                .font(.system(size: CGFloat(fontSize)))
-                .lineSpacing(3)
-                .textSelection(.enabled)
-        }
+        Text(result)
+            .font(.system(size: CGFloat(fontSize)))
+            .lineSpacing(3)
+            .textSelection(.enabled)
     }
 
     // MARK: - Action Buttons (text mode)
