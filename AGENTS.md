@@ -15,7 +15,9 @@ Then grant **Accessibility permission** when prompted (System Settings → Priva
 ## Install (Homebrew)
 
 ```bash
-brew install --cask https://raw.githubusercontent.com/lenohard/textpick/main/Casks/textpick.rb
+brew tap lenohard/textpick https://github.com/lenohard/textpick
+brew trust lenohard/textpick
+brew install --cask textpick
 ```
 
 Grant **Accessibility** after first launch. Configure your API key in Settings.

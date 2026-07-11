@@ -48,4 +48,6 @@ fi
 
 echo ""
 echo "Install:"
-echo "  brew install --cask https://raw.githubusercontent.com/lenohard/textpick/main/Casks/textpick.rb"
+echo "  brew tap lenohard/textpick https://github.com/lenohard/textpick"
+echo "  brew trust lenohard/textpick"
+echo "  brew install --cask textpick"

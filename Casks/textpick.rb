@@ -7,7 +7,7 @@ cask "textpick" do
   desc "Capture selected text and process it via LLM"
   homepage "https://github.com/lenohard/textpick"
 
-  depends_on macos: ">= :ventura"
+  depends_on macos: :ventura
 
   app "TextPick.app"
 end
