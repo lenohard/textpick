@@ -12,6 +12,24 @@ cd TextPick
 
 Then grant **Accessibility permission** when prompted (System Settings → Privacy & Security → Accessibility).
 
+## Install (Homebrew)
+
+```bash
+brew install --cask https://raw.githubusercontent.com/lenohard/textpick/main/Casks/textpick.rb
+```
+
+Grant **Accessibility** after first launch. Configure your API key in Settings.
+
+## Build & Release
+
+```bash
+cd TextPick && ./build-app.sh          # build + install to /Applications
+./release.sh 1.0.0                     # build zip, update cask sha256
+./release.sh 1.0.0 --publish           # upload to GitHub Releases
+```
+
+Tag `v*` pushes trigger `.github/workflows/release.yml` to build and attach the zip automatically.
+
 ## Key Files
 
 | File | Purpose |
@@ -99,9 +117,6 @@ Set in `.env` (copy `env.example`):
 
 ## Known Limitations / Next Steps
 
-- [ ] Streaming responses (word-by-word output)
-- [ ] Launch at login (LaunchAgent)
-- [ ] Package as `.app` bundle
 - [ ] Some sandboxed/Electron apps may not expose text via AX API (clipboard fallback handles these)
 - [ ] Replace hardcoded model metadata with provider/gateway metadata when available
-- [ ] Remove sensitive debug logging in `TextProcessingService.swift` (currently prints API key prefix / auth debug info)
+- [ ] Code signing + notarization for public distribution (currently ad-hoc signed)

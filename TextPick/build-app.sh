@@ -93,16 +93,25 @@ echo ""
 echo "✅ Built: $APP_BUNDLE"
 echo ""
 
-# ── 6. Install to /Applications ─────────────────────────────────────────────
-echo "  → Installing to /Applications..."
-pkill -x "$APP_NAME" 2>/dev/null || true
-sleep 0.3
-rm -rf "/Applications/$APP_NAME.app"
-cp -R "$APP_BUNDLE" "/Applications/$APP_NAME.app"
-rm -rf "$APP_BUNDLE"
-echo "✅ Installed: /Applications/$APP_NAME.app"
+# ── 6. Install or package ─────────────────────────────────────────────────────
+if [ "${PACKAGE_ONLY:-0}" = "1" ]; then
+    DEST="${DIST_DIR:-$SCRIPT_DIR/../dist}/$APP_NAME.app"
+    mkdir -p "$(dirname "$DEST")"
+    rm -rf "$DEST"
+    cp -R "$APP_BUNDLE" "$DEST"
+    rm -rf "$APP_BUNDLE"
+    echo "✅ Packaged: $DEST"
+else
+    echo "  → Installing to /Applications..."
+    pkill -x "$APP_NAME" 2>/dev/null || true
+    sleep 0.3
+    rm -rf "/Applications/$APP_NAME.app"
+    cp -R "$APP_BUNDLE" "/Applications/$APP_NAME.app"
+    rm -rf "$APP_BUNDLE"
+    echo "✅ Installed: /Applications/$APP_NAME.app"
 
-open "/Applications/$APP_NAME.app"
-echo ""
-echo "⚠️  First launch: grant Accessibility in System Settings → Privacy & Security → Accessibility"
-echo "    Then open Settings (click menu bar icon → Settings…) and paste your AI Gateway API key."
+    open "/Applications/$APP_NAME.app"
+    echo ""
+    echo "⚠️  First launch: grant Accessibility in System Settings → Privacy & Security → Accessibility"
+    echo "    Then open Settings (click menu bar icon → Settings…) and paste your AI Gateway API key."
+fi
