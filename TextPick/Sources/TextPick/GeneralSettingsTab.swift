@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import ServiceManagement
 
 // MARK: - General Settings Tab
 
@@ -16,6 +17,7 @@ struct GeneralSettingsTab: View {
     @AppStorage("textpick.closeOnEsc")         private var closeOnEsc:          Bool = true
     @AppStorage("textpick.switchToResult")     private var switchToResult:      Bool = true
     @AppStorage("textpick.captureMethod")      private var captureMethod:       String = "ax_first"
+    @AppStorage("textpick.launchAtLogin")      private var launchAtLogin:      Bool = false
 
     var body: some View {
         ScrollView {
@@ -119,6 +121,19 @@ struct GeneralSettingsTab: View {
                     .labelsHidden()
                 }
 
+                sectionDivider()
+
+                // ── System ───────────────────────────────────────────
+                sectionHeader("System", icon: "power")
+
+                settingRow("Launch at Login", note: "Start TextPick automatically when you log in.") {
+                    Toggle("", isOn: $launchAtLogin)
+                        .labelsHidden()
+                        .onChange(of: launchAtLogin) { newValue in
+                            toggleLaunchAtLogin(newValue)
+                        }
+                }
+
                 Spacer(minLength: 16)
             }
             .padding(.horizontal, 4)
@@ -178,6 +193,19 @@ struct GeneralSettingsTab: View {
         case "light": app.appearance = NSAppearance(named: .aqua)
         case "dark":  app.appearance = NSAppearance(named: .darkAqua)
         default:      app.appearance = nil
+        }
+    }
+
+    private func toggleLaunchAtLogin(_ enabled: Bool) {
+        do {
+            if enabled {
+                try SMAppService.mainApp.register()
+            } else {
+                try SMAppService.mainApp.unregister()
+            }
+        } catch {
+            // Silently revert on failure (e.g. sandbox restrictions)
+            launchAtLogin = !enabled
         }
     }
 }

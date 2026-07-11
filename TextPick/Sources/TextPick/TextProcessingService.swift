@@ -41,6 +41,13 @@ actor TextProcessingService {
 
     // MARK: - Public API
 
+    struct StreamResult: Sendable {
+        var content: String = ""
+        var thinking: String = ""
+    }
+
+    typealias StreamHandler = @Sendable (StreamResult) -> Void
+
     /// For actions: the entire rendered prompt is passed as the system message,
     /// with an empty user turn so the model acts on it directly.
     func process(_ renderedPrompt: String) async -> String {
@@ -48,6 +55,15 @@ actor TextProcessingService {
             return try await callAPI(system: renderedPrompt, user: "")
         } catch {
             return "⚠️ Error: \(error.localizedDescription)"
+        }
+    }
+
+    /// Streaming variant — calls `onUpdate` as content/thinking arrive.
+    func processStreaming(_ renderedPrompt: String, onUpdate: StreamHandler? = nil) async -> StreamResult {
+        do {
+            return try await callAPIStreaming(system: renderedPrompt, user: "", onUpdate: onUpdate)
+        } catch {
+            return StreamResult(content: "⚠️ Error: \(error.localizedDescription)")
         }
     }
 
@@ -60,7 +76,16 @@ actor TextProcessingService {
         }
     }
 
-    /// Vision: send an image + prompt to the vision model.
+    /// Streaming variant — calls `onUpdate` as content/thinking arrive.
+    func processStreaming(_ instruction: String, userText: String, onUpdate: StreamHandler? = nil) async -> StreamResult {
+        do {
+            return try await callAPIStreaming(system: instruction, user: userText, onUpdate: onUpdate)
+        } catch {
+            return StreamResult(content: "⚠️ Error: \(error.localizedDescription)")
+        }
+    }
+
+    /// Vision: send an image + prompt to the vision model (non-streaming).
     func processImage(imageData: Data, prompt: String) async -> String {
         do {
             return try await callVisionAPI(imageData: imageData, prompt: prompt)
@@ -69,7 +94,16 @@ actor TextProcessingService {
         }
     }
 
-    // MARK: - Vision API Call
+    /// Vision streaming variant — calls `onUpdate` as content/thinking arrive.
+    func processImageStreaming(imageData: Data, prompt: String, onUpdate: StreamHandler? = nil) async -> StreamResult {
+        do {
+            return try await callVisionAPIStreaming(imageData: imageData, prompt: prompt, onUpdate: onUpdate)
+        } catch {
+            return StreamResult(content: "⚠️ Error: \(error.localizedDescription)")
+        }
+    }
+
+    // MARK: - Vision API Call (non-streaming)
 
     private func callVisionAPI(imageData: Data, prompt: String) async throws -> String {
         let key = apiKey
@@ -78,22 +112,7 @@ actor TextProcessingService {
         guard !key.isEmpty else { throw APIError.missingAPIKey }
         guard let url = URL(string: "\(url_base)/chat/completions") else { throw APIError.invalidURL }
 
-        let base64 = imageData.base64EncodedString()
-        let imageURL = "data:image/png;base64,\(base64)"
-
-        // OpenAI vision format
-        let userContent: [[String: Any]] = [
-            ["type": "image_url", "image_url": ["url": imageURL]],
-            ["type": "text", "text": prompt]
-        ]
-        let messages: [[String: Any]] = [
-            ["role": "user", "content": userContent]
-        ]
-        let body: [String: Any] = [
-            "model": mdl,
-            "messages": messages,
-            "max_tokens": 2048,
-        ]
+        let body: [String: Any] = visionRequestBody(imageData: imageData, prompt: prompt, model: mdl)
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -105,16 +124,78 @@ actor TextProcessingService {
         let config = URLSessionConfiguration.ephemeral
         config.httpAdditionalHeaders = ["Authorization": "Bearer \(key)"]
         let session = URLSession(configuration: config)
-        let (data, response) = try await session.data(for: request)
+        do {
+            let (data, response) = try await session.data(for: request)
 
-        guard let httpResponse = response as? HTTPURLResponse else { throw APIError.invalidResponse }
-        guard httpResponse.statusCode == 200 else {
-            let body = String(data: data, encoding: .utf8) ?? ""
-            throw APIError.httpError(httpResponse.statusCode, body)
+            guard let httpResponse = response as? HTTPURLResponse else { throw APIError.invalidResponse }
+            guard httpResponse.statusCode == 200 else {
+                if httpResponse.statusCode == 401 { throw APIError.unauthorized }
+                let body = String(data: data, encoding: .utf8) ?? ""
+                throw APIError.httpError(httpResponse.statusCode, body)
+            }
+
+            let decoded = try JSONDecoder().decode(OpenAIChatResponse.self, from: data)
+            let content = decoded.choices.first?.message.content ?? ""
+            if content.isEmpty { throw APIError.emptyResponse }
+            return content
+        } catch let error as URLError {
+            throw APIError.fromURLError(error)
         }
+    }
 
-        let decoded = try JSONDecoder().decode(OpenAIChatResponse.self, from: data)
-        return decoded.choices.first?.message.content ?? "(empty response)"
+    // MARK: - Vision API Call (streaming)
+
+    private func callVisionAPIStreaming(imageData: Data, prompt: String, onUpdate: StreamHandler?) async throws -> StreamResult {
+        let key = apiKey
+        let url_base = baseURL
+        let mdl = visionModel
+        guard !key.isEmpty else { throw APIError.missingAPIKey }
+        guard let url = URL(string: "\(url_base)/chat/completions") else { throw APIError.invalidURL }
+
+        var body = visionRequestBody(imageData: imageData, prompt: prompt, model: mdl)
+        body["stream"] = true
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let authHeader = "Bearer \(key)"
+        request.setValue(authHeader, forHTTPHeaderField: "Authorization")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        request.timeoutInterval = 120
+
+        let config = URLSessionConfiguration.ephemeral
+        config.httpAdditionalHeaders = ["Authorization": authHeader]
+        let session = URLSession(configuration: config)
+        do {
+            let (bytes, response) = try await session.bytes(for: request)
+
+            guard let httpResponse = response as? HTTPURLResponse else { throw APIError.invalidResponse }
+            guard httpResponse.statusCode == 200 else {
+                if httpResponse.statusCode == 401 { throw APIError.unauthorized }
+                var errorBody = ""
+                for try await line in bytes.lines { errorBody += line }
+                throw APIError.httpError(httpResponse.statusCode, errorBody)
+            }
+
+            return try await consumeSSEStream(bytes: bytes, onUpdate: onUpdate)
+        } catch let error as URLError {
+            throw APIError.fromURLError(error)
+        }
+    }
+
+    /// Builds the OpenAI vision-format request body (shared by streaming + non-streaming).
+    private func visionRequestBody(imageData: Data, prompt: String, model mdl: String) -> [String: Any] {
+        let base64 = imageData.base64EncodedString()
+        let imageURL = "data:image/png;base64,\(base64)"
+        let userContent: [[String: Any]] = [
+            ["type": "image_url", "image_url": ["url": imageURL]],
+            ["type": "text", "text": prompt]
+        ]
+        return [
+            "model": mdl,
+            "messages": [["role": "user", "content": userContent]],
+            "max_tokens": 2048,
+        ]
     }
 
     // MARK: - API Call (OpenAI-compatible)
@@ -122,14 +203,8 @@ actor TextProcessingService {
     private func callAPI(system: String, user: String) async throws -> String {
         let key = apiKey
         let url_base = baseURL
-        let mdl = model
-        print("[TextPick] API key length=\(key.count) prefix='\(key.prefix(6))...' url=\(url_base) model=\(mdl)")
-        guard !key.isEmpty else {
-            throw APIError.missingAPIKey
-        }
-        guard let url = URL(string: "\(url_base)/chat/completions") else {
-            throw APIError.invalidURL
-        }
+        guard !key.isEmpty else { throw APIError.missingAPIKey }
+        guard let url = URL(string: "\(url_base)/chat/completions") else { throw APIError.invalidURL }
 
         var messages: [[String: String]] = []
         if !system.isEmpty { messages.append(["role": "system", "content": system]) }
@@ -150,26 +225,118 @@ actor TextProcessingService {
         request.setValue(authHeader, forHTTPHeaderField: "Authorization")
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         request.timeoutInterval = 30
-        print("[TextPick] Auth header set: Bearer \(key.prefix(6))... (total \(authHeader.count) chars)")
-        print("[TextPick] Request headers: \(request.allHTTPHeaderFields ?? [:])")
-        print("[TextPick] POST \(url.absoluteString) model=\(mdl)")
 
         // Use ephemeral session with auth in config to prevent header stripping
         let config = URLSessionConfiguration.ephemeral
         config.httpAdditionalHeaders = ["Authorization": authHeader]
         let session = URLSession(configuration: config)
-        let (data, response) = try await session.data(for: request)
+        do {
+            let (data, response) = try await session.data(for: request)
 
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw APIError.invalidResponse
-        }
-        guard httpResponse.statusCode == 200 else {
-            let body = String(data: data, encoding: .utf8) ?? ""
-            throw APIError.httpError(httpResponse.statusCode, body)
-        }
+            guard let httpResponse = response as? HTTPURLResponse else {
+                throw APIError.invalidResponse
+            }
+            guard httpResponse.statusCode == 200 else {
+                if httpResponse.statusCode == 401 { throw APIError.unauthorized }
+                let body = String(data: data, encoding: .utf8) ?? ""
+                throw APIError.httpError(httpResponse.statusCode, body)
+            }
 
-        let decoded = try JSONDecoder().decode(OpenAIChatResponse.self, from: data)
-        return decoded.choices.first?.message.content ?? "(empty response)"
+            let decoded = try JSONDecoder().decode(OpenAIChatResponse.self, from: data)
+            let content = decoded.choices.first?.message.content ?? ""
+            if content.isEmpty { throw APIError.emptyResponse }
+            return content
+        } catch let error as URLError {
+            throw APIError.fromURLError(error)
+        }
+    }
+
+    // MARK: - Streaming API Call
+
+    private func callAPIStreaming(
+        system: String,
+        user: String,
+        model overrideModel: String? = nil,
+        onUpdate: StreamHandler?
+    ) async throws -> StreamResult {
+        let key = apiKey
+        let url_base = baseURL
+        let mdl = overrideModel ?? model
+        guard !key.isEmpty else { throw APIError.missingAPIKey }
+        guard let url = URL(string: "\(url_base)/chat/completions") else { throw APIError.invalidURL }
+
+        var messages: [[String: String]] = []
+        if !system.isEmpty { messages.append(["role": "system", "content": system]) }
+        if !user.isEmpty   { messages.append(["role": "user",   "content": user]) }
+        if messages.isEmpty { throw APIError.emptyInput }
+
+        let body: [String: Any] = [
+            "model": mdl,
+            "messages": messages,
+            "max_tokens": 2048,
+            "temperature": 0.3,
+            "stream": true,
+        ]
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let authHeader = "Bearer \(key)"
+        request.setValue(authHeader, forHTTPHeaderField: "Authorization")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        request.timeoutInterval = 120
+
+        let config = URLSessionConfiguration.ephemeral
+        config.httpAdditionalHeaders = ["Authorization": authHeader]
+        let session = URLSession(configuration: config)
+        do {
+            let (bytes, response) = try await session.bytes(for: request)
+
+            guard let httpResponse = response as? HTTPURLResponse else {
+                throw APIError.invalidResponse
+            }
+            guard httpResponse.statusCode == 200 else {
+                if httpResponse.statusCode == 401 { throw APIError.unauthorized }
+                var errorBody = ""
+                for try await line in bytes.lines { errorBody += line }
+                throw APIError.httpError(httpResponse.statusCode, errorBody)
+            }
+
+            return try await consumeSSEStream(bytes: bytes, onUpdate: onUpdate)
+        } catch let error as URLError {
+            throw APIError.fromURLError(error)
+        }
+    }
+
+    /// Shared SSE consumption for text + vision streaming.
+    private func consumeSSEStream(bytes: URLSession.AsyncBytes, onUpdate: StreamHandler?) async throws -> StreamResult {
+        var result = StreamResult()
+        for try await line in bytes.lines {
+            guard line.hasPrefix("data: ") else { continue }
+            let payload = String(line.dropFirst(6)).trimmingCharacters(in: .whitespaces)
+            if payload == "[DONE]" { break }
+            guard let data = payload.data(using: .utf8),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let choices = json["choices"] as? [[String: Any]],
+                  let delta = choices.first?["delta"] as? [String: Any] else { continue }
+
+            var updated = false
+            if let content = delta["content"] as? String, !content.isEmpty {
+                result.content += content
+                updated = true
+            }
+            let reasoning = (delta["reasoning_content"] as? String)
+                ?? (delta["reasoning"] as? String)
+            if let reasoning, !reasoning.isEmpty {
+                result.thinking += reasoning
+                updated = true
+            }
+            if updated { onUpdate?(result) }
+        }
+        if result.content.isEmpty && result.thinking.isEmpty {
+            throw APIError.emptyResponse
+        }
+        return result
     }
 
     // MARK: - Model Metadata
@@ -218,6 +385,28 @@ actor TextProcessingService {
         modelMetadataTable[modelID]
     }
 
+    /// Rough token estimate: ~4 chars/token for English, ~2 for CJK. Use 3 as middle ground.
+    static func estimateTokens(_ text: String) -> Int {
+        max(1, text.count / 3)
+    }
+
+    /// Estimate cost in USD for a request given input/output text.
+    static func estimateCost(modelID: String, inputText: String, outputText: String) -> Double? {
+        guard let meta = metadata(for: modelID),
+              let inputPrice = meta.inputPricePerMillion,
+              let outputPrice = meta.outputPricePerMillion else { return nil }
+        let inputTokens = Double(estimateTokens(inputText))
+        let outputTokens = Double(estimateTokens(outputText))
+        return (inputTokens * inputPrice + outputTokens * outputPrice) / 1_000_000
+    }
+
+    /// Formatted cost string, e.g. "≈ $0.0012"
+    static func formatCost(_ cost: Double) -> String {
+        if cost < 0.0001 { return "< $0.0001" }
+        if cost < 0.01   { return String(format: "≈ $%.4f", cost) }
+        return String(format: "≈ $%.3f", cost)
+    }
+
     // MARK: - Fetch Models
 
     struct ModelInfo: Identifiable, Sendable, Codable {
@@ -247,7 +436,7 @@ actor TextProcessingService {
         }
         do {
             let models = try await fetchModels()
-            return (true, "✓ Connected — \(models.count) models available (key prefix: \(key.prefix(6))…)")
+            return (true, "✓ Connected — \(models.count) models available")
         } catch {
             return (false, error.localizedDescription)
         }
@@ -276,16 +465,35 @@ actor TextProcessingService {
         case invalidURL
         case invalidResponse
         case emptyInput
+        case emptyResponse
         case missingAPIKey
+        case unauthorized
         case httpError(Int, String)
+        case timeout
+        case networkError(String)
 
         var errorDescription: String? {
             switch self {
-            case .invalidURL:              return "Invalid API URL — check Settings → API & Model"
-            case .invalidResponse:         return "Invalid response from server"
-            case .emptyInput:              return "No input provided"
-            case .missingAPIKey:           return "API key not set — open Settings → API & Model and paste your key"
+            case .invalidURL:            return "Invalid API URL — check Settings → API & Model"
+            case .invalidResponse:       return "Invalid response from server — the gateway may be down"
+            case .emptyInput:            return "No input provided"
+            case .emptyResponse:         return "The model returned an empty response — try again or switch models"
+            case .missingAPIKey:          return "API key not set — open Settings → API & Model and paste your key"
+            case .unauthorized:          return "API key invalid or unauthorized (401) — check your key in Settings"
             case .httpError(let c, let b): return "HTTP \(c): \(b.prefix(300))"
+            case .timeout:               return "Request timed out — check your network or try a faster model"
+            case .networkError(let m):   return "Network error: \(m)"
+            }
+        }
+
+        /// Map a URLError to a clear category (timeout vs offline vs generic).
+        static func fromURLError(_ e: URLError) -> APIError {
+            switch e.code {
+            case .timedOut:            return .timeout
+            case .notConnectedToInternet, .networkConnectionLost,
+                 .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed:
+                return .networkError(e.localizedDescription)
+            default:                   return .networkError(e.localizedDescription)
             }
         }
     }

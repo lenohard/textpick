@@ -106,21 +106,21 @@ extension TextAction {
             label: "Format",
             icon: "wand.and.stars",
             prompt: """
-对字符串 {{text}} 做一下变形。\
-如果是多行文本就去掉所有的换行，变成一行；\
-如果是JSON字符串，修复语法错误并prettify（增加换行、缩进、对齐）；\
-如果是代码，修复格式和换行；\
-如果是单词或句子，修复拼写/语法错误或简单paraphrase。\
-只需要返回修复后的文本，其它什么都不要，因为我会直接用这个文本替换原始的文本。
+Transform the string {{text}} as follows:
+- If multi-line text, remove all line breaks to make a single line;
+- If a JSON string, fix syntax errors and prettify (add line breaks, indentation, alignment);
+- If code, fix formatting and line breaks;
+- If a word or sentence, fix spelling/grammar errors or lightly paraphrase.
+Return only the transformed text, nothing else, as it will directly replace the original text.
 """
         ),
         TextAction(
             label: "Explain",
             icon: "text.magnifyingglass",
             prompt: """
-用中文以整句话作为背景，解释下面这段文字中不常见的术语、单词、概念或典故。不要解释过于简单的东西，只解释最少见的，最多不超过3个。
-如果只是一个短语或单词，就直接对这个词进行解释并提供更多背景，可以详细一点。
-如果是一段代码，就解释这段代码的工作原理和细节，尤其是不那么明显的地方和使用方式。
+Explain uncommon terms, words, concepts, or allusions in the following text, using the full sentence as context. Do not explain overly simple things — only the least common ones, no more than 3.
+If it's just a phrase or single word, explain that word directly with more background; you can be more detailed.
+If it's code, explain how the code works and its details, especially non-obvious parts and usage.
 
 {{text}}
 """
@@ -129,17 +129,17 @@ extension TextAction {
             label: "Fix",
             icon: "checkmark.circle",
             prompt: """
-请修复下面的句子或者单词，比如错别字、拼写错误、语法问题，或者用词不当的要选择更合适的单词。
+Fix the following sentence or word — spelling errors, typos, grammar issues, or inappropriate word choices.
 
 {{text}}
 
-只返回修正后的结果，不要有任何多余的解释和说明。返回结果会直接替换原文。
+Return only the corrected result with no extra explanation. The result will directly replace the original text.
 """
         ),
         TextAction(
             label: "Answer",
             icon: "questionmark.bubble",
-            prompt: "回答下面这个问题：\n\n{{text}}"
+            prompt: "Answer the following question:\n\n{{text}}"
         ),
         TextAction(
             label: "Translate",
@@ -170,6 +170,9 @@ class ActionsStore: ObservableObject {
 
     private let defaultsKey = "textpick.actions"
     private let visionDefaultsKey = "textpick.visionActions"
+    private let defaultsVersionKey = "textpick.actions.version"
+    private static let defaultsVersion = 2
+    private static let defaultLabels = Set(TextAction.defaults.map(\.label))
 
     private init() {
         load()
@@ -182,10 +185,31 @@ class ActionsStore: ObservableObject {
         if let data = UserDefaults.standard.data(forKey: defaultsKey),
            let decoded = try? JSONDecoder().decode([TextAction].self, from: data) {
             actions = decoded
+            migratePromptsIfNeeded()
         } else {
             actions = TextAction.defaults
+            UserDefaults.standard.set(Self.defaultsVersion, forKey: defaultsVersionKey)
             save()
         }
+    }
+
+    /// One-time migration: replace Chinese default prompts with English equivalents.
+    private func migratePromptsIfNeeded() {
+        let savedVersion = UserDefaults.standard.integer(forKey: defaultsVersionKey)
+        guard savedVersion < Self.defaultsVersion else { return }
+
+        let englishByLabel = Dictionary(uniqueKeysWithValues: TextAction.defaults.map { ($0.label, $0.prompt) })
+        var changed = false
+        for i in actions.indices {
+            let action = actions[i]
+            guard Self.defaultLabels.contains(action.label),
+                  let englishPrompt = englishByLabel[action.label],
+                  action.prompt.range(of: "\\p{Han}", options: .regularExpression) != nil else { continue }
+            actions[i].prompt = englishPrompt
+            changed = true
+        }
+        if changed { save() }
+        UserDefaults.standard.set(Self.defaultsVersion, forKey: defaultsVersionKey)
     }
 
     func save() {

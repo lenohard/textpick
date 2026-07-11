@@ -47,16 +47,11 @@ class PopupWindowController: NSWindowController {
 
         positionNearMouse(panel: panel)
 
-        // Sync pin toggle → close-on-outside-click behavior
-        pinnedBinding.onChange = { [weak self] pinned in
-            if pinned {
-                self?.removeClickOutsideMonitor()
-            } else {
-                self?.addClickOutsideMonitor()
-            }
+        // Sync pin/streaming state → close-on-outside-click behavior
+        pinnedBinding.onChange = { [weak self] in
+            self?.syncClickOutsideMonitor()
         }
-        // Default: close on click outside
-        addClickOutsideMonitor()
+        syncClickOutsideMonitor()
 
         // ESC closes
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
@@ -76,11 +71,20 @@ class PopupWindowController: NSWindowController {
         if let m = clickOutsideMonitor { NSEvent.removeMonitor(m) }
     }
 
+    private func syncClickOutsideMonitor() {
+        if pinnedBinding.preventsAutoClose {
+            removeClickOutsideMonitor()
+        } else {
+            addClickOutsideMonitor()
+        }
+    }
+
     private func addClickOutsideMonitor() {
         guard clickOutsideMonitor == nil else { return }
         clickOutsideMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
             guard let self, let win = self.window else { return }
             if !win.isVisible { return }
+            if self.pinnedBinding.preventsAutoClose { return }
             self.close()
         }
     }
@@ -107,13 +111,22 @@ class PopupWindowController: NSWindowController {
     }
 }
 
-/// Observable wrapper so SwiftUI can read/write pin state
+/// Observable wrapper so SwiftUI can read/write popup session state
 final class PinnedState: ObservableObject {
     @Published var pinned: Bool = false
-    var onChange: ((Bool) -> Void)?
+    @Published var isProcessing: Bool = false
+    var onChange: (() -> Void)?
+
+    var preventsAutoClose: Bool { pinned || isProcessing }
 
     func toggle() {
         pinned.toggle()
-        onChange?(pinned)
+        onChange?()
+    }
+
+    func setProcessing(_ value: Bool) {
+        guard isProcessing != value else { return }
+        isProcessing = value
+        onChange?()
     }
 }

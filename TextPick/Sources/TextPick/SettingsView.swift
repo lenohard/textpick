@@ -875,152 +875,96 @@ struct HotkeySettingsTab: View {
     @State private var keyMonitor: Any? = nil
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-
-            // ── Current hotkey row ──────────────────────────────────────
-            HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Trigger Hotkey")
-                        .font(.subheadline.weight(.medium))
-                    Text("Press this combination anywhere to open TextPick")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                Spacer()
-
-                // Badge showing current hotkey
-                Text(config.displayString)
-                    .font(.system(size: 15, weight: .semibold, design: .rounded))
-                    .tracking(0.5)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 5)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(Color.accentColor.opacity(0.08))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .stroke(Color.accentColor.opacity(0.25), lineWidth: 1)
-                            )
-                    )
-                    .foregroundColor(.accentColor)
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Trigger Hotkey")
+                    .font(.subheadline.weight(.medium))
+                Text("Press this combination anywhere to open TextPick")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
-            Divider()
+            // Current hotkey + record on one row
+            HStack(spacing: 10) {
+                hotkeyBadge(isRecording ? (pendingConfig?.displayString ?? "…") : config.displayString,
+                            highlighted: !isRecording)
 
-            // ── Record zone ─────────────────────────────────────────────
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Record New Hotkey")
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.secondary)
-                    .textCase(.uppercase)
-                    .tracking(0.5)
-
-                // Record button — compact, inline
                 Button(action: isRecording ? stopRecording : startRecording) {
-                    HStack(spacing: 8) {
-                        ZStack {
-                            if isRecording {
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(isRecording ? Color.red : Color.clear)
+                            .frame(width: 8, height: 8)
+                            .overlay(
                                 Circle()
-                                    .fill(Color.red)
-                                    .frame(width: 8, height: 8)
-                                    .opacity(0.9)
-                            } else {
-                                Circle()
-                                    .strokeBorder(Color.secondary, lineWidth: 1.5)
-                                    .frame(width: 8, height: 8)
-                            }
-                        }
-                        .frame(width: 12)
-
-                        if isRecording {
-                            Text("Listening — hold modifiers + press key…")
-                                .font(.system(size: 13))
-                                .foregroundStyle(.red)
-                        } else {
-                            Text("Click to record")
-                                .font(.system(size: 13))
-                                .foregroundStyle(.primary)
-                        }
-
-                        Spacer()
-
-                        if isRecording {
-                            Text("Esc to cancel")
-                                .font(.caption)
-                                .foregroundStyle(.tertiary)
-                        }
+                                    .strokeBorder(isRecording ? Color.red : Color.secondary, lineWidth: 1.5)
+                            )
+                        Text(isRecording ? "Listening…" : "Record")
+                            .font(.system(size: 13, weight: .medium))
                     }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
                     .background(
                         RoundedRectangle(cornerRadius: 8)
-                            .fill(isRecording
-                                  ? Color.red.opacity(0.06)
-                                  : Color(NSColor.controlBackgroundColor))
+                            .fill(isRecording ? Color.red.opacity(0.08) : Color(NSColor.controlBackgroundColor))
                             .overlay(
                                 RoundedRectangle(cornerRadius: 8)
-                                    .stroke(isRecording
-                                            ? Color.red.opacity(0.3)
-                                            : Color.secondary.opacity(0.2),
-                                            lineWidth: 1)
+                                    .stroke(isRecording ? Color.red.opacity(0.35) : Color.secondary.opacity(0.25), lineWidth: 1)
                             )
                     )
                 }
                 .buttonStyle(.plain)
                 .animation(.easeInOut(duration: 0.15), value: isRecording)
 
-                // Pending result
-                if let pending = pendingConfig, !isRecording {
-                    HStack(spacing: 10) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundStyle(.green)
-                            .font(.system(size: 13))
-                        Text(pending.displayString)
-                            .font(.system(size: 14, weight: .semibold, design: .rounded))
-                            .foregroundStyle(.primary)
-                        Text("recorded")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-
-                        Spacer()
-
-                        Button("Discard") { pendingConfig = nil }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                            .foregroundStyle(.secondary)
-
-                        Button("Apply") {
-                            applyConfig(pending)
-                            pendingConfig = nil
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.small)
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(Color.green.opacity(0.05))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .stroke(Color.green.opacity(0.2), lineWidth: 1)
-                            )
-                    )
-                    .transition(.move(edge: .top).combined(with: .opacity))
-                    .animation(.spring(duration: 0.2), value: pendingConfig != nil)
+                if isRecording {
+                    Text("Esc to cancel")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
                 }
 
+                Spacer(minLength: 0)
+            }
+
+            if let pending = pendingConfig, !isRecording {
+                HStack(spacing: 8) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                        .font(.system(size: 12))
+                    hotkeyBadge(pending.displayString, highlighted: true)
+                    Text("recorded")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
+                    Button("Discard") { pendingConfig = nil }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    Button("Apply") {
+                        applyConfig(pending)
+                        pendingConfig = nil
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color.green.opacity(0.05))
+                )
+                .transition(.opacity.combined(with: .move(edge: .top)))
+                .animation(.spring(duration: 0.2), value: pendingConfig != nil)
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
                 Text("Hold ⌃ ⌥ ⇧ ⌘ + any key. At least one modifier required.")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
+                Text("If the hotkey doesn't work, it may conflict with another app's shortcut.")
+                    .font(.caption2)
+                    .foregroundStyle(.orange.opacity(0.8))
             }
 
             Spacer()
 
-            Divider()
-
-            // ── Footer ──────────────────────────────────────────────────
             HStack {
                 Button {
                     applyConfig(HotkeyConfig.default)
@@ -1050,6 +994,24 @@ struct HotkeySettingsTab: View {
         }
         .padding(20)
         .onDisappear { stopRecording() }
+    }
+
+    @ViewBuilder
+    private func hotkeyBadge(_ label: String, highlighted: Bool) -> some View {
+        Text(label)
+            .font(.system(size: 14, weight: .semibold, design: .rounded))
+            .tracking(0.5)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(highlighted ? Color.accentColor.opacity(0.08) : Color.secondary.opacity(0.08))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(highlighted ? Color.accentColor.opacity(0.25) : Color.secondary.opacity(0.2), lineWidth: 1)
+                    )
+            )
+            .foregroundColor(highlighted ? .accentColor : .primary)
     }
 
     // MARK: - Recording
@@ -1353,56 +1315,7 @@ extension APISettingsTab.TestStatus: Equatable {
 // MARK: - History Tab
 
 struct HistorySettingsTab: View {
-    @ObservedObject private var store = HistoryStore.shared
-
-    private let dateFormatter: DateFormatter = {
-        let df = DateFormatter()
-        df.dateStyle = .short
-        df.timeStyle = .short
-        return df
-    }()
-
     var body: some View {
-        VStack(spacing: 0) {
-            if store.items.isEmpty {
-                VStack(spacing: 12) {
-                    Image(systemName: "clock.arrow.circlepath")
-                        .font(.system(size: 36))
-                        .foregroundStyle(.tertiary)
-                    Text("No history yet")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                    Text("Your requests and results will appear here.")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                ScrollView {
-                    LazyVStack(spacing: 10) {
-                        ForEach(store.items) { item in
-                            HistoryCard(item: item, formatter: dateFormatter)
-                        }
-                    }
-                    .padding(12)
-                }
-
-                Divider()
-
-                HStack {
-                    Text("\(store.items.count) item\(store.items.count == 1 ? "" : "s")")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                    Spacer()
-                    Button("Clear All", role: .destructive) {
-                        store.clear()
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-            }
-        }
+        HistoryListView()
     }
 }

@@ -72,6 +72,11 @@ class HistoryStore: ObservableObject {
         items.remove(atOffsets: offsets)
         save()
     }
+
+    func delete(id: UUID) {
+        items.removeAll { $0.id == id }
+        save()
+    }
     
     private func save() {
         do {

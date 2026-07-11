@@ -19,7 +19,10 @@ struct PopupView: View {
     @AppStorage("textpick.closeOnEsc")      private var closeOnEsc:     Bool   = true
 
     @State private var result: String = ""
+    @State private var thinking: String = ""
+    @State private var isThinkingExpanded: Bool = false
     @State private var isProcessing: Bool = false
+    @State private var costEstimate: String? = nil
     @State private var activeActionID: UUID? = nil
     @State private var customPrompt: String = ""
     @State private var savedFilePath: URL? = nil
@@ -78,6 +81,8 @@ struct PopupView: View {
         .onDisappear {
             removeKeyCopyMonitor()
         }
+        .onAppear { pinnedState.setProcessing(isProcessing) }
+        .onChange(of: isProcessing) { pinnedState.setProcessing($0) }
     }
 
     // MARK: - Header
@@ -141,7 +146,7 @@ struct PopupView: View {
                     .rotationEffect(.degrees(45))
             }
             .buttonStyle(.plain)
-            .help(pinnedState.pinned ? "Unpin (auto-close on click away)" : "Pin (keep open)")
+            .help(pinnedState.pinned ? "Unpin (auto-close on click away)" : "Pin (keep open while streaming or pinned)")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -195,48 +200,88 @@ struct PopupView: View {
 
     private var resultContentView: some View {
         Group {
-            if isProcessing {
-                HStack(spacing: 10) {
-                    ProgressView().scaleEffect(0.75)
-                    Text("Processing…")
-                        .font(.system(size: 13))
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color.primary.opacity(0.03))
-            } else if !result.isEmpty {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 8) {
-                        resultBodyView
-                            .frame(maxWidth: .infinity, alignment: .leading)
-
-                        HStack {
-                            Spacer()
-                            if let savedURL = savedFilePath {
-                                Button {
-                                    NSWorkspace.shared.activateFileViewerSelecting([savedURL])
-                                } label: {
-                                    Label("Show in Finder", systemImage: "folder")
-                                        .font(.caption)
-                                }
-                                .buttonStyle(.bordered)
-                                .controlSize(.mini)
-                                .tint(.green)
+            if isProcessing && result.isEmpty && thinking.isEmpty {
+                Text("Processing…")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color.primary.opacity(0.03))
+            } else if !result.isEmpty || !thinking.isEmpty || isProcessing {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 8) {
+                            if !thinking.isEmpty {
+                                thinkingSection
                             }
-                            if let errMsg = saveError {
-                                Text(errMsg)
+                            if !result.isEmpty || (isProcessing && thinking.isEmpty) {
+                                resultBodyView
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            } else if isProcessing && !thinking.isEmpty {
+                                Text("Generating…")
                                     .font(.caption)
-                                    .foregroundStyle(.red)
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            HStack {
+                                Spacer()
+                                if let savedURL = savedFilePath {
+                                    Button {
+                                        NSWorkspace.shared.activateFileViewerSelecting([savedURL])
+                                    } label: {
+                                        Label("Show in Finder", systemImage: "folder")
+                                            .font(.caption)
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .controlSize(.mini)
+                                    .tint(.green)
+                                }
+                                if let cost = costEstimate {
+                                    Text(cost)
+                                        .font(.caption)
+                                        .foregroundStyle(.tertiary)
+                                }
+                                if let errMsg = saveError {
+                                    Text(errMsg)
+                                        .font(.caption)
+                                        .foregroundStyle(.red)
+                                }
                             }
                         }
+                        .padding(12)
+                        .id("result-bottom")
                     }
-                    .padding(12)
+                    .onChange(of: result) { _ in
+                        withAnimation { proxy.scrollTo("result-bottom", anchor: .bottom) }
+                    }
+                    .onChange(of: thinking) { _ in
+                        withAnimation { proxy.scrollTo("result-bottom", anchor: .bottom) }
+                    }
                 }
                 .background(Color.primary.opacity(0.03))
             } else {
                 Color.clear
             }
         }
+    }
+
+    private var thinkingSection: some View {
+        DisclosureGroup(isExpanded: $isThinkingExpanded) {
+            Text(thinking)
+                .font(.system(size: CGFloat(max(fontSize - 1, 11))))
+                .foregroundStyle(.secondary)
+                .lineSpacing(3)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "brain.head.profile")
+                    .font(.caption)
+                Text("Thinking")
+                    .font(.caption)
+            }
+            .foregroundStyle(.secondary)
+        }
+        .tint(.secondary)
     }
 
     @ViewBuilder
@@ -368,17 +413,26 @@ struct PopupView: View {
         activeActionID = action.id
         isProcessing = true
         result = ""
+        thinking = ""
+        isThinkingExpanded = false
         if switchToResult { contentMode = .result }
         let prompt = action.renderPrompt(with: capturedText)
         Task {
-            let output = await TextProcessingService.shared.process(prompt)
+            let streamResult = await TextProcessingService.shared.processStreaming(prompt) { update in
+                Task { @MainActor in
+                    thinking = update.thinking
+                    result = update.content
+                }
+            }
             let usedModel = await TextProcessingService.shared.model
             await MainActor.run {
-                result = output
+                result = streamResult.content
+                thinking = streamResult.thinking
                 isProcessing = false
                 contentMode = .result
-                HistoryStore.shared.add(sourceText: capturedText, actionName: action.label, fullPrompt: prompt, result: output, modelName: usedModel)
-                if autoCopy { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(output, forType: .string) }
+                HistoryStore.shared.add(sourceText: capturedText, actionName: action.label, fullPrompt: prompt, result: streamResult.content, modelName: usedModel)
+                if autoCopy { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(streamResult.content, forType: .string) }
+                costEstimate = Self.computeCost(modelID: usedModel, input: prompt, output: streamResult.content)
             }
         }
     }
@@ -389,17 +443,27 @@ struct PopupView: View {
         activeActionID = nil
         isProcessing = true
         result = ""
+        thinking = ""
+        isThinkingExpanded = false
+        costEstimate = nil
         if switchToResult { contentMode = .result }
         Task {
-            let output = await TextProcessingService.shared.process(instruction, userText: capturedText)
+            let streamResult = await TextProcessingService.shared.processStreaming(instruction, userText: capturedText) { update in
+                Task { @MainActor in
+                    thinking = update.thinking
+                    result = update.content
+                }
+            }
             let usedModel = await TextProcessingService.shared.model
             await MainActor.run {
-                result = output
+                result = streamResult.content
+                thinking = streamResult.thinking
                 isProcessing = false
                 contentMode = .result
                 let fullPrompt = "[System]\n\(instruction)\n\n[User]\n\(capturedText)"
-                HistoryStore.shared.add(sourceText: capturedText, actionName: "Custom", fullPrompt: fullPrompt, result: output, modelName: usedModel)
-                if autoCopy { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(output, forType: .string) }
+                HistoryStore.shared.add(sourceText: capturedText, actionName: "Custom", fullPrompt: fullPrompt, result: streamResult.content, modelName: usedModel)
+                if autoCopy { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(streamResult.content, forType: .string) }
+                costEstimate = Self.computeCost(modelID: usedModel, input: fullPrompt, output: streamResult.content)
             }
         }
     }
@@ -411,20 +475,30 @@ struct PopupView: View {
         activeActionID = action.id
         isProcessing = true
         result = ""
+        thinking = ""
+        isThinkingExpanded = false
+        costEstimate = nil
         savedFilePath = nil
         saveError = nil
         if switchToResult { contentMode = .result }
         Task {
-            let output = await TextProcessingService.shared.processImage(imageData: data, prompt: action.prompt)
+            let streamResult = await TextProcessingService.shared.processImageStreaming(imageData: data, prompt: action.prompt) { update in
+                Task { @MainActor in
+                    thinking = update.thinking
+                    result = update.content
+                }
+            }
             let usedModel = await TextProcessingService.shared.visionModel
             await MainActor.run {
-                result = output
+                result = streamResult.content
+                thinking = streamResult.thinking
                 isProcessing = false
                 contentMode = .result
-                HistoryStore.shared.add(sourceText: "[Image]", actionName: action.label, fullPrompt: action.prompt, result: output, modelName: usedModel)
-                if autoCopy { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(output, forType: .string) }
+                HistoryStore.shared.add(sourceText: "[Image]", actionName: action.label, fullPrompt: action.prompt, result: streamResult.content, modelName: usedModel)
+                if autoCopy { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(streamResult.content, forType: .string) }
+                costEstimate = Self.computeCost(modelID: usedModel, input: action.prompt, output: streamResult.content)
                 if action.saveToFile {
-                    switch saveResultToFile(result: output, action: action) {
+                    switch saveResultToFile(result: streamResult.content, action: action) {
                     case .success(let url): savedFilePath = url
                     case .failure(let err): saveError = "Save failed: \(err.localizedDescription)"
                     }
@@ -496,18 +570,33 @@ struct PopupView: View {
         activeActionID = nil
         isProcessing = true
         result = ""
+        thinking = ""
+        isThinkingExpanded = false
+        costEstimate = nil
         if switchToResult { contentMode = .result }
         Task {
-            let output = await TextProcessingService.shared.processImage(imageData: data, prompt: instruction)
+            let streamResult = await TextProcessingService.shared.processImageStreaming(imageData: data, prompt: instruction) { update in
+                Task { @MainActor in
+                    thinking = update.thinking
+                    result = update.content
+                }
+            }
             let usedModel = await TextProcessingService.shared.visionModel
             await MainActor.run {
-                result = output
+                result = streamResult.content
+                thinking = streamResult.thinking
                 isProcessing = false
                 contentMode = .result
-                HistoryStore.shared.add(sourceText: "[Image]", actionName: "Custom Vision", fullPrompt: instruction, result: output, modelName: usedModel)
-                if autoCopy { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(output, forType: .string) }
+                HistoryStore.shared.add(sourceText: "[Image]", actionName: "Custom Vision", fullPrompt: instruction, result: streamResult.content, modelName: usedModel)
+                if autoCopy { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(streamResult.content, forType: .string) }
+                costEstimate = Self.computeCost(modelID: usedModel, input: instruction, output: streamResult.content)
             }
         }
+    }
+
+    private static func computeCost(modelID: String, input: String, output: String) -> String? {
+        guard let cost = TextProcessingService.estimateCost(modelID: modelID, inputText: input, outputText: output) else { return nil }
+        return TextProcessingService.formatCost(cost)
     }
 }
 
@@ -522,18 +611,15 @@ struct ActionButton: View {
     var body: some View {
         Button(action: onTap) {
             HStack(spacing: 2) {
-                if isLoading {
-                    ProgressView().scaleEffect(0.6)
-                } else {
-                    Image(systemName: action.icon).font(.system(size: 11))
-                }
+                Image(systemName: action.icon).font(.system(size: 11))
                 Text(action.label).font(.system(size: 11))
             }
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
         }
         .buttonStyle(.bordered)
-        .tint(isActive ? .blue : nil)
+        .tint(isActive || isLoading ? .blue : nil)
         .controlSize(.mini)
+        .disabled(isLoading)
     }
 }
