@@ -511,6 +511,7 @@ struct APIAndModelTab: View {
     @AppStorage("textpick.model") private var model: String = "anthropic/claude-haiku-4.5"
     @AppStorage("textpick.visionModel") private var visionModel: String = ""
     @AppStorage("textpick.savedModels") private var savedModelsJSON: String = ""
+    @AppStorage("textpick.reasoningEffort") private var reasoningEffort: String = ""
 
     @State private var fetchedModels: [TextProcessingService.ModelInfo] = []
     @State private var isLoading = false
@@ -602,6 +603,30 @@ struct APIAndModelTab: View {
                         .font(.caption)
                         .foregroundStyle(testOK ? .green : .red)
                         .lineLimit(2)
+                }
+            }
+
+            Divider()
+
+            // Reasoning Effort
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Thinking / Reasoning").font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
+                HStack(spacing: 12) {
+                    Picker("Effort", selection: $reasoningEffort) {
+                        Text("Default (adaptive)").tag("")
+                        Text("Disabled").tag("none")
+                        Text("Low").tag("low")
+                        Text("Medium").tag("medium")
+                        Text("High").tag("high")
+                    }
+                    .labelsHidden()
+                    .frame(width: 180)
+
+                    Text(reasoningEffort.isEmpty
+                        ? "Model decides automatically"
+                        : "Forces reasoningEffort = \"\(reasoningEffort)\"")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
                 }
             }
 

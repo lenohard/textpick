@@ -19,33 +19,47 @@ class TextCaptureService {
 
     // MARK: - Public API (async — call from AppDelegate hotkey handler)
 
-    /// Asynchronously captures content. Calls `completion` on main thread.
-    func captureContent(completion: @escaping (CapturedContent?) -> Void) {
-        // Snapshot the frontmost app NOW, before TextPick gets involved
-        let sourceApp = NSWorkspace.shared.frontmostApplication
-
-        // 1. Try AX for text selection — instant, no side effects
+    /// Synchronous fast path — AX text or clipboard image. Call on main thread.
+    func captureFast(from sourceApp: NSRunningApplication?) -> CapturedContent? {
         if let text = captureViaAccessibility(from: sourceApp), !text.isEmpty {
             print("[TextPick] Captured via AX: \(text.prefix(80))…")
-            DispatchQueue.main.async { completion(.text(text)) }
-            return
+            return .text(text)
         }
-
-        // 2. Check clipboard for an image (user copied/screenshotted something)
         if let (image, data) = captureImageFromClipboard() {
             print("[TextPick] Captured image from clipboard: \(data.count) bytes")
-            DispatchQueue.main.async { completion(.image(image, data)) }
+            return .image(image, data)
+        }
+        return nil
+    }
+
+    /// Asynchronously captures content. Calls `completion` on main thread.
+    func captureContent(completion: @escaping (CapturedContent?) -> Void) {
+        let sourceApp = NSWorkspace.shared.frontmostApplication
+
+        if let content = captureFast(from: sourceApp) {
+            deliver(content, to: completion)
             return
         }
 
-        // 3. Fall back to ⌘C clipboard simulation
         print("[TextPick] AX failed, falling back to clipboard simulation.")
         captureViaClipboard(sourceApp: sourceApp) { text in
-            if let text = text {
-                completion(.text(text))
-            } else {
-                completion(nil)
-            }
+            self.deliver(text.map { .text($0) }, to: completion)
+        }
+    }
+
+    private func deliver(_ content: CapturedContent?, to completion: @escaping (CapturedContent?) -> Void) {
+        if Thread.isMainThread {
+            completion(content)
+        } else {
+            DispatchQueue.main.async { completion(content) }
+        }
+    }
+
+    /// Clipboard fallback when AX already failed. Pass the original source app captured before showing UI.
+    func captureClipboardFallback(from sourceApp: NSRunningApplication?, completion: @escaping (CapturedContent?) -> Void) {
+        print("[TextPick] AX failed, falling back to clipboard simulation.")
+        captureViaClipboard(sourceApp: sourceApp) { text in
+            self.deliver(text.map { .text($0) }, to: completion)
         }
     }
 
@@ -123,20 +137,31 @@ class TextCaptureService {
         // Send ⌘C to the SOURCE app's process (not the current process)
         sendCopyEvent(to: sourceApp)
 
-        // Wait async — don't block main thread
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-            let captured = pb.string(forType: .string)
+        // Poll clipboard — return as soon as copy lands (50ms intervals, 250ms max)
+        pollClipboard(pb, snapshot: saved, attempt: 0, completion: completion)
+    }
 
-            // Restore original clipboard
-            self.restoreClipboard(pb, snapshot: saved)
-
-            if let text = captured, !text.isEmpty {
-                print("[TextPick] Captured via clipboard: \(text.prefix(80))…")
-                completion(text)
-            } else {
-                print("[TextPick] No text captured.")
-                completion(nil)
-            }
+    private func pollClipboard(
+        _ pb: NSPasteboard,
+        snapshot saved: ClipboardSnapshot,
+        attempt: Int,
+        completion: @escaping (String?) -> Void
+    ) {
+        let captured = pb.string(forType: .string)
+        if let text = captured, !text.isEmpty {
+            restoreClipboard(pb, snapshot: saved)
+            print("[TextPick] Captured via clipboard: \(text.prefix(80))…")
+            completion(text)
+            return
+        }
+        if attempt >= 5 {
+            restoreClipboard(pb, snapshot: saved)
+            print("[TextPick] No text captured.")
+            completion(nil)
+            return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+            self?.pollClipboard(pb, snapshot: saved, attempt: attempt + 1, completion: completion)
         }
     }
 

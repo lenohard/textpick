@@ -117,6 +117,11 @@ Set in `.env` (copy `env.example`):
 - **Test Connection** — Built-in API connectivity test in Settings → API & Model
 - **Settings Persistence Fix** — Custom `Decodable` init for `TextAction` uses `decodeIfPresent` to tolerate missing new fields in old saved data (backward compat)
 
+## Gotchas
+
+- **Accessibility permission reset** — use `tccutil reset Accessibility com.textpick.app` (bundle ID). Never `tccutil reset Accessibility` without bundle ID — it resets ALL apps.
+- **NSPanel close button** — `.nonactivatingPanel` style can make the built-in close button unresponsive during streaming/processing. Always add an explicit close button (e.g. `xmark.circle.fill`) in the SwiftUI header that calls `onClose` directly.
+
 ## Known Limitations / Next Steps
 
 - [ ] Some sandboxed/Electron apps may not expose text via AX API (clipboard fallback handles these)

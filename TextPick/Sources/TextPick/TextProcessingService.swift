@@ -39,6 +39,10 @@ actor TextProcessingService {
             ?? model  // fall back to text model if it supports vision
     }
 
+    var reasoningEffort: String {
+        UserDefaults.standard.string(forKey: "textpick.reasoningEffort")?.nilIfEmpty ?? ""
+    }
+
     // MARK: - Public API
 
     struct StreamResult: Sendable {
@@ -46,7 +50,7 @@ actor TextProcessingService {
         var thinking: String = ""
     }
 
-    typealias StreamHandler = @Sendable (StreamResult) -> Void
+    typealias StreamHandler = @MainActor @Sendable (StreamResult) -> Void
 
     /// For actions: the entire rendered prompt is passed as the system message,
     /// with an empty user turn so the model acts on it directly.
@@ -62,6 +66,8 @@ actor TextProcessingService {
     func processStreaming(_ renderedPrompt: String, onUpdate: StreamHandler? = nil) async -> StreamResult {
         do {
             return try await callAPIStreaming(system: renderedPrompt, user: "", onUpdate: onUpdate)
+        } catch is CancellationError {
+            return StreamResult()
         } catch {
             return StreamResult(content: "⚠️ Error: \(error.localizedDescription)")
         }
@@ -80,6 +86,8 @@ actor TextProcessingService {
     func processStreaming(_ instruction: String, userText: String, onUpdate: StreamHandler? = nil) async -> StreamResult {
         do {
             return try await callAPIStreaming(system: instruction, user: userText, onUpdate: onUpdate)
+        } catch is CancellationError {
+            return StreamResult()
         } catch {
             return StreamResult(content: "⚠️ Error: \(error.localizedDescription)")
         }
@@ -98,6 +106,8 @@ actor TextProcessingService {
     func processImageStreaming(imageData: Data, prompt: String, onUpdate: StreamHandler? = nil) async -> StreamResult {
         do {
             return try await callVisionAPIStreaming(imageData: imageData, prompt: prompt, onUpdate: onUpdate)
+        } catch is CancellationError {
+            return StreamResult()
         } catch {
             return StreamResult(content: "⚠️ Error: \(error.localizedDescription)")
         }
@@ -191,11 +201,15 @@ actor TextProcessingService {
             ["type": "image_url", "image_url": ["url": imageURL]],
             ["type": "text", "text": prompt]
         ]
-        return [
+        var body: [String: Any] = [
             "model": mdl,
             "messages": [["role": "user", "content": userContent]],
             "max_tokens": 2048,
         ]
+        if !reasoningEffort.isEmpty {
+            body["reasoningEffort"] = reasoningEffort
+        }
+        return body
     }
 
     // MARK: - API Call (OpenAI-compatible)
@@ -211,12 +225,15 @@ actor TextProcessingService {
         if !user.isEmpty   { messages.append(["role": "user",   "content": user]) }
         if messages.isEmpty { throw APIError.emptyInput }
 
-        let body: [String: Any] = [
+        var body: [String: Any] = [
             "model": model,
             "messages": messages,
             "max_tokens": 2048,
             "temperature": 0.3,
         ]
+        if !reasoningEffort.isEmpty {
+            body["reasoningEffort"] = reasoningEffort
+        }
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -270,13 +287,16 @@ actor TextProcessingService {
         if !user.isEmpty   { messages.append(["role": "user",   "content": user]) }
         if messages.isEmpty { throw APIError.emptyInput }
 
-        let body: [String: Any] = [
+        var body: [String: Any] = [
             "model": mdl,
             "messages": messages,
             "max_tokens": 2048,
             "temperature": 0.3,
             "stream": true,
         ]
+        if !reasoningEffort.isEmpty {
+            body["reasoningEffort"] = reasoningEffort
+        }
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -312,6 +332,7 @@ actor TextProcessingService {
     private func consumeSSEStream(bytes: URLSession.AsyncBytes, onUpdate: StreamHandler?) async throws -> StreamResult {
         var result = StreamResult()
         for try await line in bytes.lines {
+            try Task.checkCancellation()
             guard line.hasPrefix("data: ") else { continue }
             let payload = String(line.dropFirst(6)).trimmingCharacters(in: .whitespaces)
             if payload == "[DONE]" { break }
@@ -331,7 +352,10 @@ actor TextProcessingService {
                 result.thinking += reasoning
                 updated = true
             }
-            if updated { onUpdate?(result) }
+            if updated, let onUpdate {
+                let snapshot = result
+                await MainActor.run { onUpdate(snapshot) }
+            }
         }
         if result.content.isEmpty && result.thinking.isEmpty {
             throw APIError.emptyResponse

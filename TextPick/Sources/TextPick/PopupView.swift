@@ -4,8 +4,9 @@ import AppKit
 // MARK: - Main Popup View
 
 struct PopupView: View {
-    let content: CapturedContent
+    @ObservedObject var contentState: CapturedContentState
     @ObservedObject var pinnedState: PinnedState
+    let session: PopupSession
     let onClose: () -> Void
 
     @ObservedObject private var store = ActionsStore.shared
@@ -32,6 +33,8 @@ struct PopupView: View {
     // Which content is shown in the shared text region
     private enum ContentMode { case input, result }
     @State private var contentMode: ContentMode = .input
+
+    private var content: CapturedContent { contentState.content }
 
     private var isImageMode: Bool {
         if case .image = content { return true }
@@ -81,8 +84,6 @@ struct PopupView: View {
         .onDisappear {
             removeKeyCopyMonitor()
         }
-        .onAppear { pinnedState.setProcessing(isProcessing) }
-        .onChange(of: isProcessing) { pinnedState.setProcessing($0) }
     }
 
     // MARK: - Header
@@ -138,6 +139,18 @@ struct PopupView: View {
                 .help("Copy result (C)")
             }
 
+            // Close button — always functional, even during streaming
+            Button(action: {
+                session.cancelProcessing()
+                onClose()
+            }) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Close (Esc)")
+
             // Pin button
             Button(action: { pinnedState.toggle() }) {
                 Image(systemName: pinnedState.pinned ? "pin.fill" : "pin")
@@ -172,15 +185,24 @@ struct PopupView: View {
     private var inputContentView: some View {
         switch content {
         case .text(let text):
-            ScrollView {
-                Text(text)
-                    .font(.system(size: CGFloat(fontSize)))
-                    .foregroundStyle(.primary.opacity(0.78))
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            if contentState.isCapturing && text.isEmpty {
+                Text("Capturing selection…")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .padding(12)
-                    .textSelection(.enabled)
+                    .background(Color.primary.opacity(0.03))
+            } else {
+                ScrollView {
+                    Text(text)
+                        .font(.system(size: CGFloat(fontSize)))
+                        .foregroundStyle(.primary.opacity(0.78))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(12)
+                        .textSelection(.enabled)
+                }
+                .background(Color.primary.opacity(0.03))
             }
-            .background(Color.primary.opacity(0.03))
 
         case .image(let image, _):
             imagePreviewView(image: image)
@@ -407,64 +429,69 @@ struct PopupView: View {
         }
     }
 
-    // MARK: - Handlers (text)
+    // MARK: - Processing Helpers
 
-    private func runTextAction(_ action: TextAction) {
-        activeActionID = action.id
+    private func applyStreamUpdate(_ update: TextProcessingService.StreamResult) {
+        thinking = update.thinking
+        result = update.content
+    }
+
+    private func beginProcessing(actionID: UUID? = nil, resetSavedFile: Bool = false, _ work: @escaping () async -> Void) {
+        session.cancelProcessing()
+        activeActionID = actionID
         isProcessing = true
         result = ""
         thinking = ""
         isThinkingExpanded = false
+        costEstimate = nil
+        if resetSavedFile {
+            savedFilePath = nil
+            saveError = nil
+        }
         if switchToResult { contentMode = .result }
+
+        session.processingTask = Task { @MainActor in
+            await work()
+            guard !Task.isCancelled else { return }
+            isProcessing = false
+        }
+    }
+
+    // MARK: - Handlers (text)
+
+    private func runTextAction(_ action: TextAction) {
         let prompt = action.renderPrompt(with: capturedText)
-        Task {
+        beginProcessing(actionID: action.id) {
             let streamResult = await TextProcessingService.shared.processStreaming(prompt) { update in
-                Task { @MainActor in
-                    thinking = update.thinking
-                    result = update.content
-                }
+                applyStreamUpdate(update)
             }
+            guard !Task.isCancelled else { return }
             let usedModel = await TextProcessingService.shared.model
-            await MainActor.run {
-                result = streamResult.content
-                thinking = streamResult.thinking
-                isProcessing = false
-                contentMode = .result
-                HistoryStore.shared.add(sourceText: capturedText, actionName: action.label, fullPrompt: prompt, result: streamResult.content, modelName: usedModel)
-                if autoCopy { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(streamResult.content, forType: .string) }
-                costEstimate = Self.computeCost(modelID: usedModel, input: prompt, output: streamResult.content)
-            }
+            result = streamResult.content
+            thinking = streamResult.thinking
+            contentMode = .result
+            HistoryStore.shared.add(sourceText: capturedText, actionName: action.label, fullPrompt: prompt, result: streamResult.content, modelName: usedModel)
+            if autoCopy { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(streamResult.content, forType: .string) }
+            costEstimate = Self.computeCost(modelID: usedModel, input: prompt, output: streamResult.content)
         }
     }
 
     private func runCustomPrompt() {
         let instruction = customPrompt.trimmingCharacters(in: .whitespaces)
         guard !instruction.isEmpty else { return }
-        activeActionID = nil
-        isProcessing = true
-        result = ""
-        thinking = ""
-        isThinkingExpanded = false
-        costEstimate = nil
-        if switchToResult { contentMode = .result }
-        Task {
+        beginProcessing {
             let streamResult = await TextProcessingService.shared.processStreaming(instruction, userText: capturedText) { update in
-                Task { @MainActor in
-                    thinking = update.thinking
-                    result = update.content
-                }
+                applyStreamUpdate(update)
             }
+            guard !Task.isCancelled else { return }
             let usedModel = await TextProcessingService.shared.model
-            await MainActor.run {
-                result = streamResult.content
-                thinking = streamResult.thinking
-                isProcessing = false
-                contentMode = .result
-                let fullPrompt = "[System]\n\(instruction)\n\n[User]\n\(capturedText)"
-                HistoryStore.shared.add(sourceText: capturedText, actionName: "Custom", fullPrompt: fullPrompt, result: streamResult.content, modelName: usedModel)
-                if autoCopy { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(streamResult.content, forType: .string) }
-                costEstimate = Self.computeCost(modelID: usedModel, input: fullPrompt, output: streamResult.content)
-            }
+            result = streamResult.content
+            thinking = streamResult.thinking
+            contentMode = .result
+            let fullPrompt = "[System]\n\(instruction)\n\n[User]\n\(capturedText)"
+            HistoryStore.shared.add(sourceText: capturedText, actionName: "Custom", fullPrompt: fullPrompt, result: streamResult.content, modelName: usedModel)
+            if autoCopy { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(streamResult.content, forType: .string) }
+            costEstimate = Self.computeCost(modelID: usedModel, input: fullPrompt, output: streamResult.content)
         }
     }
 
@@ -472,36 +499,22 @@ struct PopupView: View {
 
     private func runVisionAction(_ action: TextAction) {
         guard case .image(_, let data) = content else { return }
-        activeActionID = action.id
-        isProcessing = true
-        result = ""
-        thinking = ""
-        isThinkingExpanded = false
-        costEstimate = nil
-        savedFilePath = nil
-        saveError = nil
-        if switchToResult { contentMode = .result }
-        Task {
+        beginProcessing(actionID: action.id, resetSavedFile: true) {
             let streamResult = await TextProcessingService.shared.processImageStreaming(imageData: data, prompt: action.prompt) { update in
-                Task { @MainActor in
-                    thinking = update.thinking
-                    result = update.content
-                }
+                applyStreamUpdate(update)
             }
+            guard !Task.isCancelled else { return }
             let usedModel = await TextProcessingService.shared.visionModel
-            await MainActor.run {
-                result = streamResult.content
-                thinking = streamResult.thinking
-                isProcessing = false
-                contentMode = .result
-                HistoryStore.shared.add(sourceText: "[Image]", actionName: action.label, fullPrompt: action.prompt, result: streamResult.content, modelName: usedModel)
-                if autoCopy { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(streamResult.content, forType: .string) }
-                costEstimate = Self.computeCost(modelID: usedModel, input: action.prompt, output: streamResult.content)
-                if action.saveToFile {
-                    switch saveResultToFile(result: streamResult.content, action: action) {
-                    case .success(let url): savedFilePath = url
-                    case .failure(let err): saveError = "Save failed: \(err.localizedDescription)"
-                    }
+            result = streamResult.content
+            thinking = streamResult.thinking
+            contentMode = .result
+            HistoryStore.shared.add(sourceText: "[Image]", actionName: action.label, fullPrompt: action.prompt, result: streamResult.content, modelName: usedModel)
+            if autoCopy { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(streamResult.content, forType: .string) }
+            costEstimate = Self.computeCost(modelID: usedModel, input: action.prompt, output: streamResult.content)
+            if action.saveToFile {
+                switch saveResultToFile(result: streamResult.content, action: action) {
+                case .success(let url): savedFilePath = url
+                case .failure(let err): saveError = "Save failed: \(err.localizedDescription)"
                 }
             }
         }
@@ -567,30 +580,18 @@ struct PopupView: View {
         guard case .image(_, let data) = content else { return }
         let instruction = customPrompt.trimmingCharacters(in: .whitespaces)
         guard !instruction.isEmpty else { return }
-        activeActionID = nil
-        isProcessing = true
-        result = ""
-        thinking = ""
-        isThinkingExpanded = false
-        costEstimate = nil
-        if switchToResult { contentMode = .result }
-        Task {
+        beginProcessing {
             let streamResult = await TextProcessingService.shared.processImageStreaming(imageData: data, prompt: instruction) { update in
-                Task { @MainActor in
-                    thinking = update.thinking
-                    result = update.content
-                }
+                applyStreamUpdate(update)
             }
+            guard !Task.isCancelled else { return }
             let usedModel = await TextProcessingService.shared.visionModel
-            await MainActor.run {
-                result = streamResult.content
-                thinking = streamResult.thinking
-                isProcessing = false
-                contentMode = .result
-                HistoryStore.shared.add(sourceText: "[Image]", actionName: "Custom Vision", fullPrompt: instruction, result: streamResult.content, modelName: usedModel)
-                if autoCopy { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(streamResult.content, forType: .string) }
-                costEstimate = Self.computeCost(modelID: usedModel, input: instruction, output: streamResult.content)
-            }
+            result = streamResult.content
+            thinking = streamResult.thinking
+            contentMode = .result
+            HistoryStore.shared.add(sourceText: "[Image]", actionName: "Custom Vision", fullPrompt: instruction, result: streamResult.content, modelName: usedModel)
+            if autoCopy { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(streamResult.content, forType: .string) }
+            costEstimate = Self.computeCost(modelID: usedModel, input: instruction, output: streamResult.content)
         }
     }
 

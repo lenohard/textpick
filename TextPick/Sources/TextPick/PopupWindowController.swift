@@ -1,14 +1,49 @@
 import AppKit
 import SwiftUI
 
+/// NSHostingView on a non-activating panel won't receive clicks unless it accepts first mouse.
+private final class AcceptsFirstMouseHostingView<Content: View>: NSHostingView<Content> {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
+
+/// Defers close wiring until after NSWindowController.init (Swift init rules).
+private final class CloseAction {
+    var handler: (() -> Void)?
+    func perform() { handler?() }
+}
+
+/// Holds cancellable work for the popup session.
+final class PopupSession: ObservableObject {
+    var processingTask: Task<Void, Never>?
+
+    func cancelProcessing() {
+        processingTask?.cancel()
+        processingTask = nil
+    }
+}
+
+/// Observable content so slow-path clipboard capture can update the popup in place.
+final class CapturedContentState: ObservableObject {
+    @Published var content: CapturedContent
+    @Published var isCapturing: Bool
+
+    init(content: CapturedContent, isCapturing: Bool = false) {
+        self.content = content
+        self.isCapturing = isCapturing
+    }
+}
+
 /// A floating, non-activating panel that appears near the mouse cursor.
 class PopupWindowController: NSWindowController {
     private var keyMonitor: Any?
     private var clickOutsideMonitor: Any?
     /// Reflected into SwiftUI so the pin button can toggle it
     private let pinnedBinding = PinnedState()
+    private let session = PopupSession()
+    private let contentState: CapturedContentState
 
-    init(content: CapturedContent) {
+    init(content: CapturedContent, isCapturing: Bool = false) {
+        contentState = CapturedContentState(content: content, isCapturing: isCapturing)
         let savedWidth = UserDefaults.standard.double(forKey: "textpick.popupWidth")
         let panelWidth = savedWidth > 0 ? savedWidth : 420
         let opacity = UserDefaults.standard.double(forKey: "textpick.opacity")
@@ -36,14 +71,17 @@ class PopupWindowController: NSWindowController {
         panel.isOpaque = false
         panel.alphaValue = CGFloat(panelOpacity)
 
+        let closeAction = CloseAction()
         let rootView = PopupView(
-            content: content,
+            contentState: contentState,
             pinnedState: pinnedBinding,
-            onClose: { panel.close() }
+            session: session,
+            onClose: closeAction.perform
         )
-        panel.contentView = NSHostingView(rootView: rootView)
+        panel.contentView = AcceptsFirstMouseHostingView(rootView: rootView)
 
         super.init(window: panel)
+        closeAction.handler = { [weak self] in self?.close() }
 
         positionNearMouse(panel: panel)
 
@@ -98,6 +136,17 @@ class PopupWindowController: NSWindowController {
         window?.orderFrontRegardless()
     }
 
+    override func close() {
+        session.cancelProcessing()
+        pinnedBinding.setProcessing(false)
+        super.close()
+    }
+
+    func updateContent(_ content: CapturedContent) {
+        contentState.content = content
+        contentState.isCapturing = false
+    }
+
     private func positionNearMouse(panel: NSPanel) {
         let mouse = NSEvent.mouseLocation
         let size  = panel.frame.size
@@ -117,7 +166,7 @@ final class PinnedState: ObservableObject {
     @Published var isProcessing: Bool = false
     var onChange: (() -> Void)?
 
-    var preventsAutoClose: Bool { pinned || isProcessing }
+    var preventsAutoClose: Bool { pinned }
 
     func toggle() {
         pinned.toggle()

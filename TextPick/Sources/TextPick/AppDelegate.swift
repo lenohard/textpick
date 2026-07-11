@@ -120,18 +120,40 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Capture
 
     @objc func captureText() {
-        TextCaptureService.shared.captureContent { [weak self] content in
-            guard let content = content else { return }
-            self?.showPopup(with: content)
+        // HotKey may fire off the main thread — always show UI on main.
+        DispatchQueue.main.async { [weak self] in
+            self?.captureTextOnMain()
+        }
+    }
+
+    private func captureTextOnMain() {
+        let sourceApp = NSWorkspace.shared.frontmostApplication
+
+        // Fast path: AX / clipboard image — show popup immediately
+        if let content = TextCaptureService.shared.captureFast(from: sourceApp) {
+            showPopup(with: content)
+            return
+        }
+
+        // Slow path: show popup instantly, fill in content when clipboard capture lands
+        showPopup(with: .text(""), isCapturing: true)
+        TextCaptureService.shared.captureClipboardFallback(from: sourceApp) { [weak self] content in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                guard let content else {
+                    self.popupWindowController?.close()
+                    return
+                }
+                self.popupWindowController?.updateContent(content)
+            }
         }
     }
 
     // MARK: - Popup
 
-    private func showPopup(with content: CapturedContent) {
-        // Close any existing popup first
+    private func showPopup(with content: CapturedContent, isCapturing: Bool = false) {
         popupWindowController?.close()
-        popupWindowController = PopupWindowController(content: content)
+        popupWindowController = PopupWindowController(content: content, isCapturing: isCapturing)
         popupWindowController?.showWindow(nil)
     }
 }
