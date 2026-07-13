@@ -12,6 +12,12 @@ private final class CloseAction {
     func perform() { handler?() }
 }
 
+/// Defers expand wiring until after NSWindowController.init (Swift init rules).
+private final class ExpandAction {
+    var handler: (() -> Void)?
+    func perform() { handler?() }
+}
+
 /// Holds cancellable work for the popup session.
 final class PopupSession: ObservableObject {
     var processingTask: Task<Void, Never>?
@@ -33,24 +39,39 @@ final class CapturedContentState: ObservableObject {
     }
 }
 
+enum PopupDisplayMode {
+    case full
+    case compact
+}
+
 /// A floating, non-activating panel that appears near the mouse cursor.
 class PopupWindowController: NSWindowController {
     private var keyMonitor: Any?
     private var clickOutsideMonitor: Any?
     /// Reflected into SwiftUI so the pin button can toggle it
-    private let pinnedBinding = PinnedState()
+    let pinnedState = PinnedState()
     private let session = PopupSession()
     private let contentState: CapturedContentState
+    let autoOpened: Bool
+    private let displayMode: PopupDisplayMode
 
-    init(content: CapturedContent, isCapturing: Bool = false) {
+    init(
+        content: CapturedContent,
+        isCapturing: Bool = false,
+        displayMode: PopupDisplayMode = .full,
+        autoOpened: Bool = false
+    ) {
         contentState = CapturedContentState(content: content, isCapturing: isCapturing)
+        self.displayMode = displayMode
+        self.autoOpened = autoOpened
         let savedWidth = UserDefaults.standard.double(forKey: "textpick.popupWidth")
         let panelWidth = savedWidth > 0 ? savedWidth : 420
         let opacity = UserDefaults.standard.double(forKey: "textpick.opacity")
         let panelOpacity = opacity > 0 ? opacity : 1.0
 
+        let panelHeight: CGFloat = displayMode == .compact ? 48 : 300
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: panelWidth, height: 300),
+            contentRect: NSRect(x: 0, y: 0, width: panelWidth, height: panelHeight),
             styleMask: [
                 .titled,
                 .closable,
@@ -72,21 +93,30 @@ class PopupWindowController: NSWindowController {
         panel.alphaValue = CGFloat(panelOpacity)
 
         let closeAction = CloseAction()
+        let expandAction = ExpandAction()
         let rootView = PopupView(
             contentState: contentState,
-            pinnedState: pinnedBinding,
+            pinnedState: pinnedState,
             session: session,
-            onClose: closeAction.perform
+            displayMode: displayMode,
+            onClose: closeAction.perform,
+            onExpandFromCompact: expandAction.perform
         )
         panel.contentView = AcceptsFirstMouseHostingView(rootView: rootView)
 
         super.init(window: panel)
         closeAction.handler = { [weak self] in self?.close() }
+        expandAction.handler = { [weak self, weak panel] in
+            guard let self, let panel else { return }
+            let w = savedWidth > 0 ? savedWidth : 420
+            panel.setContentSize(NSSize(width: w, height: 300))
+            self.positionNearMouse(panel: panel)
+        }
 
         positionNearMouse(panel: panel)
 
         // Sync pin/streaming state → close-on-outside-click behavior
-        pinnedBinding.onChange = { [weak self] in
+        pinnedState.onChange = { [weak self] in
             self?.syncClickOutsideMonitor()
         }
         syncClickOutsideMonitor()
@@ -110,7 +140,7 @@ class PopupWindowController: NSWindowController {
     }
 
     private func syncClickOutsideMonitor() {
-        if pinnedBinding.preventsAutoClose {
+        if pinnedState.preventsAutoClose {
             removeClickOutsideMonitor()
         } else {
             addClickOutsideMonitor()
@@ -122,7 +152,7 @@ class PopupWindowController: NSWindowController {
         clickOutsideMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
             guard let self, let win = self.window else { return }
             if !win.isVisible { return }
-            if self.pinnedBinding.preventsAutoClose { return }
+            if self.pinnedState.preventsAutoClose { return }
             self.close()
         }
     }
@@ -138,7 +168,7 @@ class PopupWindowController: NSWindowController {
 
     override func close() {
         session.cancelProcessing()
-        pinnedBinding.setProcessing(false)
+        pinnedState.setProcessing(false)
         super.close()
     }
 
@@ -166,7 +196,7 @@ final class PinnedState: ObservableObject {
     @Published var isProcessing: Bool = false
     var onChange: (() -> Void)?
 
-    var preventsAutoClose: Bool { pinned }
+    var preventsAutoClose: Bool { pinned || isProcessing }
 
     func toggle() {
         pinned.toggle()

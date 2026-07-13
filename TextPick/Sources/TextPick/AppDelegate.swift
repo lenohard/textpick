@@ -10,6 +10,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         setupMainMenu()
         setupStatusBar()
         setupHotKey()
+        setupSelectionMonitor()
         requestAccessibilityPermission()
         NotificationCenter.default.addObserver(
             self,
@@ -127,17 +128,43 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func captureTextOnMain() {
-        let sourceApp = NSWorkspace.shared.frontmostApplication
+        presentCapture(from: NSWorkspace.shared.frontmostApplication, autoOpened: false)
+    }
 
-        // Fast path: AX / clipboard image — show popup immediately
+    // MARK: - Selection Monitor
+
+    private func setupSelectionMonitor() {
+        SelectionMonitorService.shared.onSelectionReady = { [weak self] text in
+            DispatchQueue.main.async {
+                self?.showSelectionPopup(with: text)
+            }
+        }
+        SelectionMonitorService.shared.onSelectionCleared = { [weak self] in
+            DispatchQueue.main.async {
+                guard let self, let popup = self.popupWindowController, popup.autoOpened else { return }
+                if !popup.pinnedState.isProcessing && !popup.pinnedState.pinned {
+                    popup.close()
+                    SelectionMonitorService.shared.resetLastShown()
+                }
+            }
+        }
+        SelectionMonitorService.shared.start()
+    }
+
+    private func showSelectionPopup(with text: String) {
+        let style = SelectionTriggerStyle.current
+        let displayMode: PopupDisplayMode = style == .compact ? .compact : .full
+        showPopup(with: .text(text), displayMode: displayMode, autoOpened: true)
+    }
+
+    private func presentCapture(from sourceApp: NSRunningApplication?, autoOpened: Bool) {
         if let content = TextCaptureService.shared.captureFast(from: sourceApp) {
-            showPopup(with: content)
+            showPopup(with: content, autoOpened: autoOpened)
             return
         }
 
-        // Slow path: show popup instantly, fill in content when clipboard capture lands
-        showPopup(with: .text(""), isCapturing: true)
-        TextCaptureService.shared.captureClipboardFallback(from: sourceApp) { [weak self] content in
+        showPopup(with: .text(""), isCapturing: true, autoOpened: autoOpened)
+        TextCaptureService.shared.capture(from: sourceApp) { [weak self] content in
             DispatchQueue.main.async {
                 guard let self else { return }
                 guard let content else {
@@ -151,9 +178,23 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Popup
 
-    private func showPopup(with content: CapturedContent, isCapturing: Bool = false) {
+    private func showPopup(
+        with content: CapturedContent,
+        isCapturing: Bool = false,
+        displayMode: PopupDisplayMode = .full,
+        autoOpened: Bool = false
+    ) {
         popupWindowController?.close()
-        popupWindowController = PopupWindowController(content: content, isCapturing: isCapturing)
+        if !autoOpened {
+            // Hotkey-driven popup shouldn't suppress the next selection trigger.
+            SelectionMonitorService.shared.resetLastShown()
+        }
+        popupWindowController = PopupWindowController(
+            content: content,
+            isCapturing: isCapturing,
+            displayMode: displayMode,
+            autoOpened: autoOpened
+        )
         popupWindowController?.showWindow(nil)
     }
 }

@@ -7,7 +7,9 @@ struct PopupView: View {
     @ObservedObject var contentState: CapturedContentState
     @ObservedObject var pinnedState: PinnedState
     let session: PopupSession
+    let displayMode: PopupDisplayMode
     let onClose: () -> Void
+    var onExpandFromCompact: (() -> Void)? = nil
 
     @ObservedObject private var store = ActionsStore.shared
 
@@ -29,6 +31,7 @@ struct PopupView: View {
     @State private var savedFilePath: URL? = nil
     @State private var saveError: String? = nil
     @State private var copyFeedback: Bool = false
+    @State private var expandedFromCompact: Bool = false
 
     // Which content is shown in the shared text region
     private enum ContentMode { case input, result }
@@ -54,7 +57,27 @@ struct PopupView: View {
         store.visionActions.filter(\.isEnabled)
     }
 
+    private var isCompactLayout: Bool {
+        displayMode == .compact && !expandedFromCompact && !isProcessing && result.isEmpty
+    }
+
     var body: some View {
+        Group {
+            if isCompactLayout {
+                compactBody
+            } else {
+                fullBody
+            }
+        }
+        .onAppear {
+            setupKeyCopyMonitor()
+        }
+        .onDisappear {
+            removeKeyCopyMonitor()
+        }
+    }
+
+    private var fullBody: some View {
         VStack(alignment: .leading, spacing: 0) {
             headerView
             Divider()
@@ -78,12 +101,31 @@ struct PopupView: View {
             RoundedRectangle(cornerRadius: 12)
                 .stroke(Color.primary.opacity(0.1), lineWidth: 1)
         )
-        .onAppear {
-            setupKeyCopyMonitor()
+    }
+
+    private var compactBody: some View {
+        HStack(spacing: 4) {
+            if isImageMode {
+                visionActionButtonsView
+            } else {
+                actionButtonsView
+            }
+            Button(action: onClose) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Close")
         }
-        .onDisappear {
-            removeKeyCopyMonitor()
-        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(.regularMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(Color.primary.opacity(0.1), lineWidth: 1)
+        )
     }
 
     // MARK: - Header
@@ -440,6 +482,11 @@ struct PopupView: View {
         session.cancelProcessing()
         activeActionID = actionID
         isProcessing = true
+        pinnedState.setProcessing(true)
+        if displayMode == .compact && !expandedFromCompact {
+            expandedFromCompact = true
+            onExpandFromCompact?()
+        }
         result = ""
         thinking = ""
         isThinkingExpanded = false
@@ -451,9 +498,11 @@ struct PopupView: View {
         if switchToResult { contentMode = .result }
 
         session.processingTask = Task { @MainActor in
+            defer {
+                isProcessing = false
+                pinnedState.setProcessing(false)
+            }
             await work()
-            guard !Task.isCancelled else { return }
-            isProcessing = false
         }
     }
 

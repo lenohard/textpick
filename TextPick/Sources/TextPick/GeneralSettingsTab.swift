@@ -17,6 +17,8 @@ struct GeneralSettingsTab: View {
     @AppStorage("textpick.closeOnEsc")         private var closeOnEsc:          Bool = true
     @AppStorage("textpick.switchToResult")     private var switchToResult:      Bool = true
     @AppStorage("textpick.captureMethod")      private var captureMethod:       String = "ax_first"
+    @AppStorage("textpick.autoShowOnSelection") private var autoShowOnSelection: Bool = false
+    @AppStorage("textpick.selectionTriggerStyle") private var selectionTriggerStyle: String = "compact"
     @AppStorage("textpick.launchAtLogin")      private var launchAtLogin:      Bool = false
 
     var body: some View {
@@ -103,6 +105,22 @@ struct GeneralSettingsTab: View {
 
                 settingRow("Close on Escape", note: nil) {
                     Toggle("", isOn: $closeOnEsc).labelsHidden()
+                }
+
+                settingRow("Auto-show on Selection", note: "Show TextPick when you select text in any app.") {
+                    Toggle("", isOn: $autoShowOnSelection).labelsHidden()
+                }
+
+                if autoShowOnSelection {
+                    settingRow("Selection Style", note: "Compact bar is less intrusive; full popup shows input text and custom prompt.") {
+                        Picker("", selection: $selectionTriggerStyle) {
+                            Text("Compact action bar").tag("compact")
+                            Text("Full popup").tag("popup")
+                        }
+                        .pickerStyle(.segmented)
+                        .frame(width: 260)
+                        .labelsHidden()
+                    }
                 }
 
                 sectionDivider()
