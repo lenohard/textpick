@@ -74,6 +74,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func openSettings() {
+        popupWindowController?.close()
+        popupWindowController = nil
         SettingsWindowController.showSettings()
     }
 

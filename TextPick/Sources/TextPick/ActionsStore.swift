@@ -34,13 +34,34 @@ struct TextAction: Identifiable, Codable, Equatable {
     /// How to name the saved file
     var filenameFormat: FilenameFormat = .timestampDescription
 
-    /// Renders the final prompt by substituting {{text}} with the captured text.
-    /// If the prompt contains no placeholder, the captured text is appended.
-    func renderPrompt(with text: String) -> String {
-        if prompt.contains("{{text}}") {
-            return prompt.replacingOccurrences(of: "{{text}}", with: text)
+    /// Whether this action expects input from the custom prompt field.
+    var requiresUserInput: Bool { prompt.contains("{{userInput}}") }
+
+    /// Renders the final prompt by substituting {{text}} and {{userInput}}.
+    /// If the prompt contains no {{text}} placeholder, captured text is appended.
+    func renderPrompt(with text: String, userInput: String = "") -> String {
+        PromptTemplate.render(prompt, text: text, userInput: userInput, appendTextIfMissing: true)
+    }
+}
+
+// MARK: - Prompt Template
+
+enum PromptTemplate {
+    static let defaultCustomTemplate = "{{userInput}}\n\n{{text}}"
+
+    static func render(
+        _ template: String,
+        text: String,
+        userInput: String = "",
+        appendTextIfMissing: Bool = false
+    ) -> String {
+        var result = template
+            .replacingOccurrences(of: "{{text}}", with: text)
+            .replacingOccurrences(of: "{{userInput}}", with: userInput)
+        if appendTextIfMissing, !template.contains("{{text}}"), !text.isEmpty {
+            result += "\n\n" + text
         }
-        return prompt + "\n\n" + text
+        return result
     }
 }
 

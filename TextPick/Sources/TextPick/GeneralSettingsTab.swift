@@ -20,6 +20,7 @@ struct GeneralSettingsTab: View {
     @AppStorage("textpick.autoShowOnSelection") private var autoShowOnSelection: Bool = false
     @AppStorage("textpick.selectionTriggerStyle") private var selectionTriggerStyle: String = "compact"
     @AppStorage("textpick.launchAtLogin")      private var launchAtLogin:      Bool = false
+    @AppStorage("textpick.customPromptTemplate") private var customPromptTemplate: String = PromptTemplate.defaultCustomTemplate
 
     var body: some View {
         ScrollView {
@@ -106,6 +107,29 @@ struct GeneralSettingsTab: View {
                 settingRow("Close on Escape", note: nil) {
                     Toggle("", isOn: $closeOnEsc).labelsHidden()
                 }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Custom Prompt Template")
+                        .font(.system(size: 13))
+                    Text("How the custom prompt field combines with captured text. Use {{userInput}} and {{text}}.")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                    TextEditor(text: $customPromptTemplate)
+                        .font(.system(size: 12, design: .monospaced))
+                        .frame(height: 72)
+                        .border(Color.secondary.opacity(0.3), width: 1)
+                    HStack {
+                        Button("Reset Default") {
+                            customPromptTemplate = PromptTemplate.defaultCustomTemplate
+                        }
+                        .buttonStyle(.borderless)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        Spacer()
+                    }
+                }
+                .padding(.vertical, 5)
+                .padding(.horizontal, 4)
 
                 settingRow("Auto-show on Selection", note: "Show TextPick when you select text in any app.") {
                     Toggle("", isOn: $autoShowOnSelection).labelsHidden()

@@ -20,6 +20,7 @@ struct PopupView: View {
     @AppStorage("textpick.showInputText")   private var showInputText:  Bool   = true
     @AppStorage("textpick.switchToResult")  private var switchToResult: Bool   = true
     @AppStorage("textpick.closeOnEsc")      private var closeOnEsc:     Bool   = true
+    @AppStorage("textpick.customPromptTemplate") private var customPromptTemplate: String = PromptTemplate.defaultCustomTemplate
 
     @State private var result: String = ""
     @State private var thinking: String = ""
@@ -365,7 +366,8 @@ struct PopupView: View {
                     ActionButton(
                         action: action,
                         isActive: activeActionID == action.id,
-                        isLoading: isProcessing && activeActionID == action.id
+                        isLoading: isProcessing && activeActionID == action.id,
+                        isDisabled: action.requiresUserInput && customPrompt.trimmingCharacters(in: .whitespaces).isEmpty
                     ) {
                         runTextAction(action)
                     }
@@ -385,7 +387,8 @@ struct PopupView: View {
                     ActionButton(
                         action: action,
                         isActive: activeActionID == action.id,
-                        isLoading: isProcessing && activeActionID == action.id
+                        isLoading: isProcessing && activeActionID == action.id,
+                        isDisabled: action.requiresUserInput && customPrompt.trimmingCharacters(in: .whitespaces).isEmpty
                     ) {
                         runVisionAction(action)
                     }
@@ -509,7 +512,8 @@ struct PopupView: View {
     // MARK: - Handlers (text)
 
     private func runTextAction(_ action: TextAction) {
-        let prompt = action.renderPrompt(with: capturedText)
+        let userInput = customPrompt.trimmingCharacters(in: .whitespaces)
+        let prompt = action.renderPrompt(with: capturedText, userInput: userInput)
         beginProcessing(actionID: action.id) {
             let streamResult = await TextProcessingService.shared.processStreaming(prompt) { update in
                 applyStreamUpdate(update)
@@ -526,10 +530,14 @@ struct PopupView: View {
     }
 
     private func runCustomPrompt() {
-        let instruction = customPrompt.trimmingCharacters(in: .whitespaces)
-        guard !instruction.isEmpty else { return }
+        let userInput = customPrompt.trimmingCharacters(in: .whitespaces)
+        guard !userInput.isEmpty else { return }
+        let template = customPromptTemplate.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? PromptTemplate.defaultCustomTemplate
+            : customPromptTemplate
+        let prompt = PromptTemplate.render(template, text: capturedText, userInput: userInput)
         beginProcessing {
-            let streamResult = await TextProcessingService.shared.processStreaming(instruction, userText: capturedText) { update in
+            let streamResult = await TextProcessingService.shared.processStreaming(prompt) { update in
                 applyStreamUpdate(update)
             }
             guard !Task.isCancelled else { return }
@@ -537,10 +545,9 @@ struct PopupView: View {
             result = streamResult.content
             thinking = streamResult.thinking
             contentMode = .result
-            let fullPrompt = "[System]\n\(instruction)\n\n[User]\n\(capturedText)"
-            HistoryStore.shared.add(sourceText: capturedText, actionName: "Custom", fullPrompt: fullPrompt, result: streamResult.content, modelName: usedModel)
+            HistoryStore.shared.add(sourceText: capturedText, actionName: "Custom", fullPrompt: prompt, result: streamResult.content, modelName: usedModel)
             if autoCopy { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(streamResult.content, forType: .string) }
-            costEstimate = Self.computeCost(modelID: usedModel, input: fullPrompt, output: streamResult.content)
+            costEstimate = Self.computeCost(modelID: usedModel, input: prompt, output: streamResult.content)
         }
     }
 
@@ -548,8 +555,10 @@ struct PopupView: View {
 
     private func runVisionAction(_ action: TextAction) {
         guard case .image(_, let data) = content else { return }
+        let userInput = customPrompt.trimmingCharacters(in: .whitespaces)
+        let prompt = action.renderPrompt(with: "", userInput: userInput)
         beginProcessing(actionID: action.id, resetSavedFile: true) {
-            let streamResult = await TextProcessingService.shared.processImageStreaming(imageData: data, prompt: action.prompt) { update in
+            let streamResult = await TextProcessingService.shared.processImageStreaming(imageData: data, prompt: prompt) { update in
                 applyStreamUpdate(update)
             }
             guard !Task.isCancelled else { return }
@@ -557,9 +566,9 @@ struct PopupView: View {
             result = streamResult.content
             thinking = streamResult.thinking
             contentMode = .result
-            HistoryStore.shared.add(sourceText: "[Image]", actionName: action.label, fullPrompt: action.prompt, result: streamResult.content, modelName: usedModel)
+            HistoryStore.shared.add(sourceText: "[Image]", actionName: action.label, fullPrompt: prompt, result: streamResult.content, modelName: usedModel)
             if autoCopy { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(streamResult.content, forType: .string) }
-            costEstimate = Self.computeCost(modelID: usedModel, input: action.prompt, output: streamResult.content)
+            costEstimate = Self.computeCost(modelID: usedModel, input: prompt, output: streamResult.content)
             if action.saveToFile {
                 switch saveResultToFile(result: streamResult.content, action: action) {
                 case .success(let url): savedFilePath = url
@@ -627,10 +636,14 @@ struct PopupView: View {
 
     private func runCustomVisionPrompt() {
         guard case .image(_, let data) = content else { return }
-        let instruction = customPrompt.trimmingCharacters(in: .whitespaces)
-        guard !instruction.isEmpty else { return }
+        let userInput = customPrompt.trimmingCharacters(in: .whitespaces)
+        guard !userInput.isEmpty else { return }
+        let template = customPromptTemplate.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? PromptTemplate.defaultCustomTemplate
+            : customPromptTemplate
+        let prompt = PromptTemplate.render(template, text: "", userInput: userInput)
         beginProcessing {
-            let streamResult = await TextProcessingService.shared.processImageStreaming(imageData: data, prompt: instruction) { update in
+            let streamResult = await TextProcessingService.shared.processImageStreaming(imageData: data, prompt: prompt) { update in
                 applyStreamUpdate(update)
             }
             guard !Task.isCancelled else { return }
@@ -638,9 +651,9 @@ struct PopupView: View {
             result = streamResult.content
             thinking = streamResult.thinking
             contentMode = .result
-            HistoryStore.shared.add(sourceText: "[Image]", actionName: "Custom Vision", fullPrompt: instruction, result: streamResult.content, modelName: usedModel)
+            HistoryStore.shared.add(sourceText: "[Image]", actionName: "Custom Vision", fullPrompt: prompt, result: streamResult.content, modelName: usedModel)
             if autoCopy { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(streamResult.content, forType: .string) }
-            costEstimate = Self.computeCost(modelID: usedModel, input: instruction, output: streamResult.content)
+            costEstimate = Self.computeCost(modelID: usedModel, input: prompt, output: streamResult.content)
         }
     }
 
@@ -656,6 +669,7 @@ struct ActionButton: View {
     let action: TextAction
     let isActive: Bool
     let isLoading: Bool
+    var isDisabled: Bool = false
     let onTap: () -> Void
 
     var body: some View {
@@ -670,6 +684,6 @@ struct ActionButton: View {
         .buttonStyle(.bordered)
         .tint(isActive || isLoading ? .blue : nil)
         .controlSize(.mini)
-        .disabled(isLoading)
+        .disabled(isLoading || isDisabled)
     }
 }

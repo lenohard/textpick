@@ -230,7 +230,7 @@ struct ActionEditor: View {
                         Text("(sent directly to the vision model with the image)")
                             .font(.caption).foregroundStyle(.tertiary)
                     } else {
-                        Text("(use {{text}} as placeholder for captured text)")
+                        Text("(use {{text}} and {{userInput}} placeholders)")
                             .font(.caption).foregroundStyle(.tertiary)
                     }
                 }

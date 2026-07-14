@@ -47,7 +47,8 @@ enum PopupDisplayMode {
 /// A floating, non-activating panel that appears near the mouse cursor.
 class PopupWindowController: NSWindowController {
     private var keyMonitor: Any?
-    private var clickOutsideMonitor: Any?
+    private var clickOutsideGlobalMonitor: Any?
+    private var clickOutsideLocalMonitor: Any?
     /// Reflected into SwiftUI so the pin button can toggle it
     let pinnedState = PinnedState()
     private let session = PopupSession()
@@ -74,7 +75,6 @@ class PopupWindowController: NSWindowController {
             contentRect: NSRect(x: 0, y: 0, width: panelWidth, height: panelHeight),
             styleMask: [
                 .titled,
-                .closable,
                 .fullSizeContentView,
                 .nonactivatingPanel,
             ],
@@ -91,7 +91,9 @@ class PopupWindowController: NSWindowController {
         panel.hasShadow = true
         panel.isOpaque = false
         panel.alphaValue = CGFloat(panelOpacity)
-
+        panel.standardWindowButton(.closeButton)?.isHidden = true
+        panel.standardWindowButton(.miniaturizeButton)?.isHidden = true
+        panel.standardWindowButton(.zoomButton)?.isHidden = true
         let closeAction = CloseAction()
         let expandAction = ExpandAction()
         let rootView = PopupView(
@@ -136,7 +138,7 @@ class PopupWindowController: NSWindowController {
 
     deinit {
         if let m = keyMonitor          { NSEvent.removeMonitor(m) }
-        if let m = clickOutsideMonitor { NSEvent.removeMonitor(m) }
+        removeClickOutsideMonitor()
     }
 
     private func syncClickOutsideMonitor() {
@@ -148,17 +150,30 @@ class PopupWindowController: NSWindowController {
     }
 
     private func addClickOutsideMonitor() {
-        guard clickOutsideMonitor == nil else { return }
-        clickOutsideMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
-            guard let self, let win = self.window else { return }
-            if !win.isVisible { return }
-            if self.pinnedState.preventsAutoClose { return }
-            self.close()
+        guard clickOutsideGlobalMonitor == nil else { return }
+        // Global: clicks in other apps. Local: clicks in our app (e.g. Settings) outside the popup.
+        clickOutsideGlobalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
+            self?.closeIfClickOutsidePopup()
+        }
+        clickOutsideLocalMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
+            self?.closeIfClickOutsidePopup(at: NSEvent.mouseLocation)
+            return event
+        }
+    }
+
+    private func closeIfClickOutsidePopup(at location: NSPoint? = nil) {
+        guard let win = window else { return }
+        if !win.isVisible { return }
+        if pinnedState.preventsAutoClose { return }
+        let point = location ?? NSEvent.mouseLocation
+        if !win.frame.contains(point) {
+            close()
         }
     }
 
     private func removeClickOutsideMonitor() {
-        if let m = clickOutsideMonitor { NSEvent.removeMonitor(m); clickOutsideMonitor = nil }
+        if let m = clickOutsideGlobalMonitor { NSEvent.removeMonitor(m); clickOutsideGlobalMonitor = nil }
+        if let m = clickOutsideLocalMonitor { NSEvent.removeMonitor(m); clickOutsideLocalMonitor = nil }
     }
 
     override func showWindow(_ sender: Any?) {
