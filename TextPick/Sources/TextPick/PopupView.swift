@@ -20,15 +20,15 @@ struct PopupView: View {
     @AppStorage("textpick.showInputText")   private var showInputText:  Bool   = true
     @AppStorage("textpick.switchToResult")  private var switchToResult: Bool   = true
     @AppStorage("textpick.closeOnEsc")      private var closeOnEsc:     Bool   = true
-    @AppStorage("textpick.customPromptTemplate") private var customPromptTemplate: String = PromptTemplate.defaultCustomTemplate
-
     @State private var result: String = ""
     @State private var thinking: String = ""
     @State private var isThinkingExpanded: Bool = false
     @State private var isProcessing: Bool = false
     @State private var costEstimate: String? = nil
     @State private var activeActionID: UUID? = nil
-    @State private var customPrompt: String = ""
+    @State private var followUpQuestion: String = ""
+    /// Conversation history for follow-up. Reassigned (not appended in place) to trigger @State updates.
+    @State private var messages: [[String: Any]] = []
     @State private var savedFilePath: URL? = nil
     @State private var saveError: String? = nil
     @State private var copyFeedback: Bool = false
@@ -93,7 +93,7 @@ struct PopupView: View {
                 actionButtonsView
             }
             Divider()
-            customPromptView
+            followUpView
         }
         .frame(width: CGFloat(popupWidthPref > 0 ? popupWidthPref : 420))
         .background(.regularMaterial)
@@ -366,8 +366,7 @@ struct PopupView: View {
                     ActionButton(
                         action: action,
                         isActive: activeActionID == action.id,
-                        isLoading: isProcessing && activeActionID == action.id,
-                        isDisabled: action.requiresUserInput && customPrompt.trimmingCharacters(in: .whitespaces).isEmpty
+                        isLoading: isProcessing && activeActionID == action.id
                     ) {
                         runTextAction(action)
                     }
@@ -387,8 +386,7 @@ struct PopupView: View {
                     ActionButton(
                         action: action,
                         isActive: activeActionID == action.id,
-                        isLoading: isProcessing && activeActionID == action.id,
-                        isDisabled: action.requiresUserInput && customPrompt.trimmingCharacters(in: .whitespaces).isEmpty
+                        isLoading: isProcessing && activeActionID == action.id
                     ) {
                         runVisionAction(action)
                     }
@@ -399,44 +397,50 @@ struct PopupView: View {
         .padding(.vertical, 4)
     }
 
-    // MARK: - Custom Prompt
+    // MARK: - Follow-up Input
 
-    private var customPromptView: some View {
+    private var followUpView: some View {
         HStack(spacing: 8) {
             HStack(spacing: 6) {
-                Image(systemName: isImageMode ? "questionmark.bubble" : "pencil.and.sparkles")
+                Image(systemName: "bubble.left.and.bubble.right")
                     .foregroundStyle(.tertiary)
                     .font(.system(size: 12))
                 TextField(
-                    isImageMode ? "Ask about this image…" : "Custom instruction for the selected text…",
-                    text: $customPrompt
+                    followUpPlaceholder,
+                    text: $followUpQuestion
                 )
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
-                .onSubmit {
-                    if isImageMode { runCustomVisionPrompt() }
-                    else { runCustomPrompt() }
-                }
+                .onSubmit { runFollowUp() }
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
             .background(Color.primary.opacity(0.05))
             .clipShape(RoundedRectangle(cornerRadius: 8))
 
-            Button(action: { if isImageMode { runCustomVisionPrompt() } else { runCustomPrompt() } }) {
+            Button(action: runFollowUp) {
                 Image(systemName: "arrow.up.circle.fill")
                     .font(.system(size: 26))
-                    .foregroundStyle(canSubmitCustom ? (isImageMode ? .purple : .blue) : Color.secondary.opacity(0.4))
+                    .foregroundStyle(canSubmitFollowUp ? (isImageMode ? .purple : .blue) : Color.secondary.opacity(0.4))
             }
             .buttonStyle(.plain)
-            .disabled(!canSubmitCustom)
+            .disabled(!canSubmitFollowUp)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
     }
 
-    private var canSubmitCustom: Bool {
-        !customPrompt.trimmingCharacters(in: .whitespaces).isEmpty && !isProcessing
+    private var followUpPlaceholder: String {
+        guard !messages.isEmpty else {
+            return isImageMode ? "Click an action above to start…" : "Click an action above to start…"
+        }
+        return isImageMode ? "Ask a follow-up about this image…" : "Ask a follow-up about the result…"
+    }
+
+    private var canSubmitFollowUp: Bool {
+        !followUpQuestion.trimmingCharacters(in: .whitespaces).isEmpty
+            && !isProcessing
+            && !messages.isEmpty
     }
 
     // MARK: - Key Monitor
@@ -512,10 +516,13 @@ struct PopupView: View {
     // MARK: - Handlers (text)
 
     private func runTextAction(_ action: TextAction) {
-        let userInput = customPrompt.trimmingCharacters(in: .whitespaces)
-        let prompt = action.renderPrompt(with: capturedText, userInput: userInput)
+        let prompt = action.renderPrompt(with: capturedText)
+        let initial: [[String: Any]] = [
+            ["role": "system", "content": prompt]
+        ]
+        messages = initial
         beginProcessing(actionID: action.id) {
-            let streamResult = await TextProcessingService.shared.processStreaming(prompt) { update in
+            let streamResult = await TextProcessingService.shared.processMessagesStreaming(messages: initial) { update in
                 applyStreamUpdate(update)
             }
             guard !Task.isCancelled else { return }
@@ -523,31 +530,37 @@ struct PopupView: View {
             result = streamResult.content
             thinking = streamResult.thinking
             contentMode = .result
+            messages = initial + [["role": "assistant", "content": streamResult.content]]
             HistoryStore.shared.add(sourceText: capturedText, actionName: action.label, fullPrompt: prompt, result: streamResult.content, modelName: usedModel)
             if autoCopy { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(streamResult.content, forType: .string) }
             costEstimate = Self.computeCost(modelID: usedModel, input: prompt, output: streamResult.content)
         }
     }
 
-    private func runCustomPrompt() {
-        let userInput = customPrompt.trimmingCharacters(in: .whitespaces)
-        guard !userInput.isEmpty else { return }
-        let template = customPromptTemplate.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            ? PromptTemplate.defaultCustomTemplate
-            : customPromptTemplate
-        let prompt = PromptTemplate.render(template, text: capturedText, userInput: userInput)
+    /// Append a follow-up turn to the conversation chain. Works for both text and vision modes —
+    /// vision chains have an array `content` in the first user turn; this just appends a plain text turn.
+    private func runFollowUp() {
+        let question = followUpQuestion.trimmingCharacters(in: .whitespaces)
+        guard !question.isEmpty, !messages.isEmpty, !isProcessing else { return }
+        let turn: [String: Any] = ["role": "user", "content": question]
+        let chain = messages + [turn]
+        followUpQuestion = ""
         beginProcessing {
-            let streamResult = await TextProcessingService.shared.processStreaming(prompt) { update in
+            let streamResult = await TextProcessingService.shared.processMessagesStreaming(messages: chain) { update in
                 applyStreamUpdate(update)
             }
             guard !Task.isCancelled else { return }
-            let usedModel = await TextProcessingService.shared.model
+            let hasVision = chain.contains { ($0["content"] as? [[String: Any]]) != nil }
+            let usedModel = hasVision
+                ? await TextProcessingService.shared.visionModel
+                : await TextProcessingService.shared.model
             result = streamResult.content
             thinking = streamResult.thinking
             contentMode = .result
-            HistoryStore.shared.add(sourceText: capturedText, actionName: "Custom", fullPrompt: prompt, result: streamResult.content, modelName: usedModel)
+            messages = chain + [["role": "assistant", "content": streamResult.content]]
+            HistoryStore.shared.add(sourceText: "[Follow-up]", actionName: "Follow-up", fullPrompt: question, result: streamResult.content, modelName: usedModel)
             if autoCopy { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(streamResult.content, forType: .string) }
-            costEstimate = Self.computeCost(modelID: usedModel, input: prompt, output: streamResult.content)
+            costEstimate = Self.computeCost(modelID: usedModel, input: question, output: streamResult.content)
         }
     }
 
@@ -555,10 +568,20 @@ struct PopupView: View {
 
     private func runVisionAction(_ action: TextAction) {
         guard case .image(_, let data) = content else { return }
-        let userInput = customPrompt.trimmingCharacters(in: .whitespaces)
-        let prompt = action.renderPrompt(with: "", userInput: userInput)
+        let prompt = action.renderPrompt(with: "")
+        let base64 = data.base64EncodedString()
+        let imageURL = "data:image/png;base64,\(base64)"
+        let userContent: [[String: Any]] = [
+            ["type": "image_url", "image_url": ["url": imageURL]],
+            ["type": "text", "text": ""]
+        ]
+        let initial: [[String: Any]] = [
+            ["role": "system", "content": prompt],
+            ["role": "user", "content": userContent]
+        ]
+        messages = initial
         beginProcessing(actionID: action.id, resetSavedFile: true) {
-            let streamResult = await TextProcessingService.shared.processImageStreaming(imageData: data, prompt: prompt) { update in
+            let streamResult = await TextProcessingService.shared.processMessagesStreaming(messages: initial) { update in
                 applyStreamUpdate(update)
             }
             guard !Task.isCancelled else { return }
@@ -566,6 +589,7 @@ struct PopupView: View {
             result = streamResult.content
             thinking = streamResult.thinking
             contentMode = .result
+            messages = initial + [["role": "assistant", "content": streamResult.content]]
             HistoryStore.shared.add(sourceText: "[Image]", actionName: action.label, fullPrompt: prompt, result: streamResult.content, modelName: usedModel)
             if autoCopy { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(streamResult.content, forType: .string) }
             costEstimate = Self.computeCost(modelID: usedModel, input: prompt, output: streamResult.content)
@@ -631,29 +655,6 @@ struct PopupView: View {
             return .success(fileURL)
         } catch {
             return .failure(error)
-        }
-    }
-
-    private func runCustomVisionPrompt() {
-        guard case .image(_, let data) = content else { return }
-        let userInput = customPrompt.trimmingCharacters(in: .whitespaces)
-        guard !userInput.isEmpty else { return }
-        let template = customPromptTemplate.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            ? PromptTemplate.defaultCustomTemplate
-            : customPromptTemplate
-        let prompt = PromptTemplate.render(template, text: "", userInput: userInput)
-        beginProcessing {
-            let streamResult = await TextProcessingService.shared.processImageStreaming(imageData: data, prompt: prompt) { update in
-                applyStreamUpdate(update)
-            }
-            guard !Task.isCancelled else { return }
-            let usedModel = await TextProcessingService.shared.visionModel
-            result = streamResult.content
-            thinking = streamResult.thinking
-            contentMode = .result
-            HistoryStore.shared.add(sourceText: "[Image]", actionName: "Custom Vision", fullPrompt: prompt, result: streamResult.content, modelName: usedModel)
-            if autoCopy { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(streamResult.content, forType: .string) }
-            costEstimate = Self.computeCost(modelID: usedModel, input: prompt, output: streamResult.content)
         }
     }
 

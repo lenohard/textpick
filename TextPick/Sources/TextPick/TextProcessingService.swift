@@ -93,6 +93,23 @@ actor TextProcessingService {
         }
     }
 
+    /// Multi-turn: caller builds the full messages array (system/user/assistant turns).
+    /// Text content is a String; vision user content is an Array of content parts.
+    /// Works for both text and vision conversations.
+    func processMessagesStreaming(
+        messages: [[String: Any]],
+        model overrideModel: String? = nil,
+        onUpdate: StreamHandler? = nil
+    ) async -> StreamResult {
+        do {
+            return try await callAPIMessages(messages: messages, model: overrideModel, onUpdate: onUpdate)
+        } catch is CancellationError {
+            return StreamResult()
+        } catch {
+            return StreamResult(content: "⚠️ Error: \(error.localizedDescription)")
+        }
+    }
+
     /// Vision: send an image + prompt to the vision model (non-streaming).
     func processImage(imageData: Data, prompt: String) async -> String {
         do {
@@ -110,6 +127,57 @@ actor TextProcessingService {
             return StreamResult()
         } catch {
             return StreamResult(content: "⚠️ Error: \(error.localizedDescription)")
+        }
+    }
+
+    // MARK: - Multi-turn API Call (streaming)
+
+    private func callAPIMessages(
+        messages: [[String: Any]],
+        model overrideModel: String?,
+        onUpdate: StreamHandler?
+    ) async throws -> StreamResult {
+        let key = apiKey
+        let url_base = baseURL
+        let mdl = overrideModel ?? model
+        guard !key.isEmpty else { throw APIError.missingAPIKey }
+        guard let url = URL(string: "\(url_base)/chat/completions") else { throw APIError.invalidURL }
+        guard !messages.isEmpty else { throw APIError.emptyInput }
+
+        var body: [String: Any] = [
+            "model": mdl,
+            "messages": messages,
+            "max_tokens": 2048,
+            "temperature": 0.3,
+            "stream": true,
+        ]
+        if !reasoningEffort.isEmpty {
+            body["reasoningEffort"] = reasoningEffort
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let authHeader = "Bearer \(key)"
+        request.setValue(authHeader, forHTTPHeaderField: "Authorization")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        request.timeoutInterval = 120
+
+        let config = URLSessionConfiguration.ephemeral
+        config.httpAdditionalHeaders = ["Authorization": authHeader]
+        let session = URLSession(configuration: config)
+        do {
+            let (bytes, response) = try await session.bytes(for: request)
+            guard let httpResponse = response as? HTTPURLResponse else { throw APIError.invalidResponse }
+            guard httpResponse.statusCode == 200 else {
+                if httpResponse.statusCode == 401 { throw APIError.unauthorized }
+                var errorBody = ""
+                for try await line in bytes.lines { errorBody += line }
+                throw APIError.httpError(httpResponse.statusCode, errorBody)
+            }
+            return try await consumeSSEStream(bytes: bytes, onUpdate: onUpdate)
+        } catch let error as URLError {
+            throw APIError.fromURLError(error)
         }
     }
 

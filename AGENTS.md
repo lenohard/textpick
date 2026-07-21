@@ -40,7 +40,7 @@ Tag `v*` pushes trigger `.github/workflows/release.yml` to build and attach the 
 | `TextPick/Sources/TextPick/AppDelegate.swift` | Status bar icon, main menu, global hotkey wiring |
 | `TextPick/Sources/TextPick/TextCaptureService.swift` | Selected text capture (AX API + clipboard fallback) |
 | `TextPick/Sources/TextPick/PopupWindowController.swift` | Floating NSPanel positioned near mouse cursor |
-| `TextPick/Sources/TextPick/PopupView.swift` | SwiftUI popup — action buttons, custom prompt, Markdown/plain result rendering, history logging |
+| `TextPick/Sources/TextPick/PopupView.swift` | SwiftUI popup — action buttons, follow-up question input, Markdown/plain result rendering, history logging, multi-turn message chain |
 | `TextPick/Sources/TextPick/TextProcessingService.swift` | LLM API client (OpenAI-compatible) + local model metadata for pricing/capabilities/context |
 | `TextPick/Sources/TextPick/HistoryStore.swift` | Persistent history storage (max 100 items) |
 | `TextPick/Sources/TextPick/HistoryListView.swift` | History UI component |
@@ -64,7 +64,7 @@ PopupWindowController (NSPanel, .floating level, .nonactivatingPanel)
         ├── Mode: text OR image (clipboard screenshot)
         ├── Text: Action buttons (Format/Explain/Fix/Answer/Translate)
         ├── Image: Vision action buttons (OCR/Describe/Ask/Translate/Summarize)
-        ├── Custom prompt input
+        ├── Follow-up question input (multi-turn, appends to message chain)
         └── Result area (scrollable, selectable, copy, show-in-finder)
               │
               ▼
@@ -116,11 +116,16 @@ Set in `.env` (copy `env.example`):
 - **Save Result to File** — Vision actions can auto-save LLM result to disk. Configurable: save directory (default `~/Pictures/TextPick`), filename format (description / timestamp / timestamp+description). After save, "Show in Finder" button appears.
 - **Test Connection** — Built-in API connectivity test in Settings → API & Model
 - **Settings Persistence Fix** — Custom `Decodable` init for `TextAction` uses `decodeIfPresent` to tolerate missing new fields in old saved data (backward compat)
+- **Follow-up questions** — The popup keeps a `messages: [[String: Any]]` chain per session. Clicking an action button resets the chain; a follow-up appends a user turn, re-sends the full chain, then appends the assistant turn. Vision is auto-detected by any user turn whose content is a `[[String:Any]]` content-part array, which is what picks the vision model. The follow-up field is disabled until at least one turn has completed.
+- **Prompt template** — `PromptTemplate.render` only substitutes `{{text}}`. If the template doesn't contain it, the captured text is appended.
 
 ## Gotchas
 
 - **Accessibility permission reset** — use `tccutil reset Accessibility com.textpick.app` (bundle ID). Never `tccutil reset Accessibility` without bundle ID — it resets ALL apps.
 - **NSPanel close button** — `.nonactivatingPanel` style can make the built-in close button unresponsive during streaming/processing. Always add an explicit close button (e.g. `xmark.circle.fill`) in the SwiftUI header that calls `onClose` directly.
+- **Popup traffic lights** — drop `.closable` from panel style mask; also hide `standardWindowButton(.close/miniaturize/zoom)` since titled panels still show them.
+- **Click-outside dismiss** — global monitor alone misses same-app clicks (e.g. Settings). Add a local monitor too; close popup explicitly when opening Settings (`Cmd+,`).
+- **Message chain reset on action switch** — When the user clicks a different action button mid-conversation, reset `messages` so the new system prompt doesn't get combined with stale turns. Don't append; rebuild from scratch.
 
 ## Known Limitations / Next Steps
 
