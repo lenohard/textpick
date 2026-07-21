@@ -147,7 +147,6 @@ actor TextProcessingService {
         var body: [String: Any] = [
             "model": mdl,
             "messages": messages,
-            "max_tokens": 2048,
             "temperature": 0.3,
             "stream": true,
         ]
@@ -272,7 +271,6 @@ actor TextProcessingService {
         var body: [String: Any] = [
             "model": mdl,
             "messages": [["role": "user", "content": userContent]],
-            "max_tokens": 2048,
         ]
         if !reasoningEffort.isEmpty {
             body["reasoningEffort"] = reasoningEffort
@@ -296,7 +294,6 @@ actor TextProcessingService {
         var body: [String: Any] = [
             "model": model,
             "messages": messages,
-            "max_tokens": 2048,
             "temperature": 0.3,
         ]
         if !reasoningEffort.isEmpty {
@@ -358,7 +355,6 @@ actor TextProcessingService {
         var body: [String: Any] = [
             "model": mdl,
             "messages": messages,
-            "max_tokens": 2048,
             "temperature": 0.3,
             "stream": true,
         ]
