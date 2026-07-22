@@ -20,7 +20,15 @@ brew trust lenohard/textpick
 brew install --cask textpick
 ```
 
-Grant **Accessibility** after first launch. Configure your API key in Settings.
+Grant **Accessibility** after first launch. If upgrading from a previous build and the hotkey stops working, reset the permission and re-grant:
+
+```bash
+tccutil reset Accessibility com.textpick.app
+```
+
+Then re-grant in **System Settings → Privacy & Security → Accessibility**.
+
+Configure your API key in Settings.
 
 ## Build & Release
 
@@ -116,7 +124,7 @@ Set in `.env` (copy `env.example`):
 - **Save Result to File** — Vision actions can auto-save LLM result to disk. Configurable: save directory (default `~/Pictures/TextPick`), filename format (description / timestamp / timestamp+description). After save, "Show in Finder" button appears.
 - **Test Connection** — Built-in API connectivity test in Settings → API & Model
 - **Settings Persistence Fix** — Custom `Decodable` init for `TextAction` uses `decodeIfPresent` to tolerate missing new fields in old saved data (backward compat)
-- **Follow-up questions** — The popup keeps a `messages: [[String: Any]]` chain per session. Clicking an action button resets the chain; a follow-up appends a user turn, re-sends the full chain, then appends the assistant turn. Vision is auto-detected by any user turn whose content is a `[[String:Any]]` content-part array, which is what picks the vision model. The follow-up field is disabled until at least one turn has completed.
+- **Follow-up questions & direct ask** — The popup keeps a `messages: [[String: Any]]` chain per session. Clicking an action button resets the chain. A follow-up appends a user turn, re-sends the full chain, then appends the assistant turn (multi-turn, LLM sees the whole history). Vision is auto-detected by any user turn whose content is a `[[String:Any]]` content-part array, which is what picks the vision model. If no action has been run, the follow-up field still works — it builds a default user message from the captured text (`背景：.../问题：...`) or the image + question, so the user can ask without first picking an action.
 - **Prompt template** — `PromptTemplate.render` only substitutes `{{text}}`. If the template doesn't contain it, the captured text is appended.
 
 ## Gotchas
@@ -126,6 +134,7 @@ Set in `.env` (copy `env.example`):
 - **Popup traffic lights** — drop `.closable` from panel style mask; also hide `standardWindowButton(.close/miniaturize/zoom)` since titled panels still show them.
 - **Click-outside dismiss** — global monitor alone misses same-app clicks (e.g. Settings). Add a local monitor too; close popup explicitly when opening Settings (`Cmd+,`).
 - **Message chain reset on action switch** — When the user clicks a different action button mid-conversation, reset `messages` so the new system prompt doesn't get combined with stale turns. Don't append; rebuild from scratch.
+- **Plain `c` key copy shortcut** — The popup registers a local key monitor that treats bare `c` (no modifiers) as "copy the current result". It must skip when the first responder is an `NSText` (e.g. the follow-up TextField), otherwise typing `c` in the field gets swallowed. Also gated on `contentMode == .result && !result.isEmpty`.
 
 ## Known Limitations / Next Steps
 
