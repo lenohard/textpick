@@ -431,8 +431,8 @@ struct PopupView: View {
     }
 
     private var followUpPlaceholder: String {
-        guard !messages.isEmpty else {
-            return isImageMode ? "Click an action above to start…" : "Click an action above to start…"
+        if messages.isEmpty {
+            return isImageMode ? "Ask anything about this image…" : "Ask anything about the selected text…"
         }
         return isImageMode ? "Ask a follow-up about this image…" : "Ask a follow-up about the result…"
     }
@@ -440,7 +440,6 @@ struct PopupView: View {
     private var canSubmitFollowUp: Bool {
         !followUpQuestion.trimmingCharacters(in: .whitespaces).isEmpty
             && !isProcessing
-            && !messages.isEmpty
     }
 
     // MARK: - Key Monitor
@@ -455,6 +454,10 @@ struct PopupView: View {
                 && event.modifierFlags.intersection([.command, .option, .control, .shift]).isEmpty
                 && self.contentMode == .result
                 && !self.result.isEmpty {
+                // Don't intercept while a text field has focus (let it receive the keystroke)
+                if let fr = event.window?.firstResponder, fr is NSText {
+                    return event
+                }
                 self.copyResult()
                 return nil  // consume event
             }
@@ -537,13 +540,45 @@ struct PopupView: View {
         }
     }
 
-    /// Append a follow-up turn to the conversation chain. Works for both text and vision modes —
-    /// vision chains have an array `content` in the first user turn; this just appends a plain text turn.
+    /// Send a follow-up turn. If no action has been run yet, build a default user message
+    /// from the captured text/image (text mode: "背景：.../问题：..."; image mode: image+question
+    /// content parts). Otherwise append a plain text turn to the existing chain.
     private func runFollowUp() {
         let question = followUpQuestion.trimmingCharacters(in: .whitespaces)
-        guard !question.isEmpty, !messages.isEmpty, !isProcessing else { return }
-        let turn: [String: Any] = ["role": "user", "content": question]
-        let chain = messages + [turn]
+        guard !question.isEmpty, !isProcessing else { return }
+
+        let chain: [[String: Any]]
+        let historyPrompt: String
+        let historySource: String
+        let historyAction: String
+
+        if messages.isEmpty {
+            // No action clicked — direct ask using the captured content as context.
+            if isImageMode, case .image(_, let data) = content {
+                let base64 = data.base64EncodedString()
+                let imageURL = "data:image/png;base64,\(base64)"
+                let userContent: [[String: Any]] = [
+                    ["type": "image_url", "image_url": ["url": imageURL]],
+                    ["type": "text", "text": "问题：\(question)"],
+                ]
+                chain = [["role": "user", "content": userContent]]
+                historySource = "[Image]"
+            } else {
+                let body = capturedText.isEmpty
+                    ? question
+                    : "背景：\(capturedText)\n问题：\(question)"
+                chain = [["role": "user", "content": body]]
+                historySource = capturedText
+            }
+            historyPrompt = question
+            historyAction = "Direct Ask"
+        } else {
+            chain = messages + [["role": "user", "content": question]]
+            historySource = "[Follow-up]"
+            historyPrompt = question
+            historyAction = "Follow-up"
+        }
+
         followUpQuestion = ""
         beginProcessing {
             let streamResult = await TextProcessingService.shared.processMessagesStreaming(messages: chain) { update in
@@ -558,9 +593,9 @@ struct PopupView: View {
             thinking = streamResult.thinking
             contentMode = .result
             messages = chain + [["role": "assistant", "content": streamResult.content]]
-            HistoryStore.shared.add(sourceText: "[Follow-up]", actionName: "Follow-up", fullPrompt: question, result: streamResult.content, modelName: usedModel)
+            HistoryStore.shared.add(sourceText: historySource, actionName: historyAction, fullPrompt: historyPrompt, result: streamResult.content, modelName: usedModel)
             if autoCopy { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(streamResult.content, forType: .string) }
-            costEstimate = Self.computeCost(modelID: usedModel, input: question, output: streamResult.content)
+            costEstimate = Self.computeCost(modelID: usedModel, input: historyPrompt, output: streamResult.content)
         }
     }
 
