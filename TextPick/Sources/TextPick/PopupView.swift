@@ -776,7 +776,19 @@ struct MarkdownResultView: View {
             .replacingOccurrences(of: "\\r\\n", with: "\n")
             .replacingOccurrences(of: "\\n", with: "\n")
             .replacingOccurrences(of: "\\t", with: "\t")
-        return (try? AttributedString(markdown: normalized)) ?? AttributedString(normalized)
+
+        // Markdown treats single \n as soft wrap (space). Convert single
+        // newlines to hard breaks (two trailing spaces) so LLM output preserves
+        // line structure. Skip inside fenced code blocks (``` ... ```).
+        let paragraphs = normalized.components(separatedBy: "\n\n")
+        let hardened = paragraphs.map { para -> String in
+            // Don't touch fenced code blocks
+            if para.hasPrefix("```") { return para }
+            // Single \n → hard break (two spaces before \n)
+            return para.replacingOccurrences(of: "\n", with: "  \n")
+        }.joined(separator: "\n\n")
+
+        return (try? AttributedString(markdown: hardened)) ?? AttributedString(hardened)
     }
 }
 
