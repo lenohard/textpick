@@ -355,23 +355,38 @@ struct PopupView: View {
     }
 
     private var thinkingSection: some View {
-        DisclosureGroup(isExpanded: $isThinkingExpanded) {
-            Text(thinking)
-                .font(.system(size: CGFloat(max(fontSize - 1, 11))))
-                .foregroundStyle(.secondary)
-                .lineSpacing(3)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        } label: {
+        VStack(alignment: .leading, spacing: 0) {
+            // Tappable label row
             HStack(spacing: 6) {
+                Image(systemName: isThinkingExpanded ? "chevron.down" : "chevron.right")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
                 Image(systemName: "brain.head.profile")
                     .font(.caption)
                 Text("Thinking")
                     .font(.caption)
+                Spacer()
             }
             .foregroundStyle(.secondary)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    isThinkingExpanded.toggle()
+                }
+            }
+            .padding(.vertical, 4)
+
+            // Collapsible content
+            if isThinkingExpanded {
+                Text(thinking)
+                    .font(.system(size: CGFloat(max(fontSize - 1, 11))))
+                    .foregroundStyle(.secondary)
+                    .lineSpacing(3)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 4)
+            }
         }
-        .tint(.secondary)
     }
 
     @ViewBuilder
