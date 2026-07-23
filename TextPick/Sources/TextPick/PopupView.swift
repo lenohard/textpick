@@ -182,6 +182,18 @@ struct PopupView: View {
                 .help("Copy result (C)")
             }
 
+            if isProcessing {
+                Button {
+                    session.cancelProcessing()
+                } label: {
+                    Image(systemName: "stop.circle.fill")
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Stop generating")
+            }
+
             // Close button — always functional, even during streaming
             Button(action: {
                 session.cancelProcessing()
@@ -211,16 +223,17 @@ struct PopupView: View {
     // MARK: - Shared Content Region
 
     private var contentRegion: some View {
-        ZStack(alignment: .topLeading) {
-            // Input: text or image
-            inputContentView
-                .opacity(contentMode == .input ? 1 : 0)
-
-            // Result / processing
-            resultContentView
-                .opacity(contentMode == .result ? 1 : 0)
+        Group {
+            // Keep only one scroll view alive. The old opacity-based ZStack kept
+            // both input and result trees active, which made every stream update
+            // do roughly twice the layout work.
+            if contentMode == .input {
+                inputContentView
+            } else {
+                resultContentView
+            }
         }
-        .frame(minHeight: isImageMode ? 140 : 80, maxHeight: isImageMode ? 260 : 200)
+        .frame(minHeight: isImageMode ? 140 : 96, maxHeight: isImageMode ? 260 : 240)
         .animation(.easeInOut(duration: 0.18), value: contentMode)
     }
 
@@ -316,10 +329,22 @@ struct PopupView: View {
                         .id("result-bottom")
                     }
                     .onChange(of: result) { _ in
-                        withAnimation { proxy.scrollTo("result-bottom", anchor: .bottom) }
+                        guard isProcessing else { return }
+                        // Streaming updates are deliberately not animated. A
+                        // scroll animation per token makes long answers feel
+                        // laggy and can fight the user's own scrolling.
+                        proxy.scrollTo("result-bottom", anchor: .bottom)
                     }
                     .onChange(of: thinking) { _ in
-                        withAnimation { proxy.scrollTo("result-bottom", anchor: .bottom) }
+                        guard isProcessing else { return }
+                        proxy.scrollTo("result-bottom", anchor: .bottom)
+                    }
+                    .onChange(of: isProcessing) { processing in
+                        if !processing {
+                            withAnimation(.easeOut(duration: 0.15)) {
+                                proxy.scrollTo("result-bottom", anchor: .bottom)
+                            }
+                        }
                     }
                 }
                 .background(Color.primary.opacity(0.03))
@@ -351,10 +376,17 @@ struct PopupView: View {
 
     @ViewBuilder
     private var resultBodyView: some View {
-        Text(result)
-            .font(.system(size: CGFloat(fontSize)))
-            .lineSpacing(3)
-            .textSelection(.enabled)
+        if isProcessing {
+            // Keep the hot streaming path cheap. Parse Markdown once when the
+            // response completes instead of rebuilding an attributed document
+            // for every incoming token.
+            Text(result)
+                .font(.system(size: CGFloat(fontSize)))
+                .lineSpacing(3)
+                .textSelection(.enabled)
+        } else {
+            MarkdownResultView(markdown: result, fontSize: CGFloat(fontSize))
+        }
     }
 
     // MARK: - Action Buttons (text mode)
@@ -699,6 +731,40 @@ struct PopupView: View {
     }
 }
 
+// MARK: - Markdown Result
+
+/// Native Foundation Markdown rendering keeps the app lightweight while
+/// supporting headings, emphasis, links, lists, block quotes, and code spans.
+/// The fallback preserves the raw response if a provider returns malformed
+/// Markdown.
+struct MarkdownResultView: View {
+    let markdown: String
+    let fontSize: CGFloat
+
+    @State private var renderedText: AttributedString
+
+    init(markdown: String, fontSize: CGFloat = 13) {
+        self.markdown = markdown
+        self.fontSize = fontSize
+        _renderedText = State(initialValue: Self.parse(markdown))
+    }
+
+    var body: some View {
+        Text(renderedText)
+            .font(.system(size: fontSize))
+            .lineSpacing(3)
+            .textSelection(.enabled)
+            .tint(.accentColor)
+            .onChange(of: markdown) { newValue in
+                renderedText = Self.parse(newValue)
+            }
+    }
+
+    private static func parse(_ value: String) -> AttributedString {
+        (try? AttributedString(markdown: value)) ?? AttributedString(value)
+    }
+}
+
 // MARK: - Action Button
 
 struct ActionButton: View {
@@ -710,12 +776,19 @@ struct ActionButton: View {
 
     var body: some View {
         Button(action: onTap) {
-            HStack(spacing: 2) {
-                Image(systemName: action.icon).font(.system(size: 11))
+            HStack(spacing: 4) {
+                if isLoading {
+                    ProgressView()
+                        .controlSize(.mini)
+                        .scaleEffect(0.65)
+                        .frame(width: 11, height: 11)
+                } else {
+                    Image(systemName: action.icon).font(.system(size: 11))
+                }
                 Text(action.label).font(.system(size: 11))
             }
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
         }
         .buttonStyle(.bordered)
         .tint(isActive || isLoading ? .blue : nil)

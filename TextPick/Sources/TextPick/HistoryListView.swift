@@ -262,7 +262,8 @@ struct HistoryDetailView: View {
                 HistoryDetailSection(
                     title: "Result",
                     text: item.result,
-                    monospaced: false
+                    monospaced: false,
+                    rendersMarkdown: true
                 )
             }
             .padding(16)
@@ -277,6 +278,7 @@ private struct HistoryDetailSection: View {
     let title: String
     let text: String
     let monospaced: Bool
+    var rendersMarkdown: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -300,14 +302,20 @@ private struct HistoryDetailSection: View {
                 .foregroundStyle(.secondary)
             }
 
-            Text(text)
-                .font(.system(size: monospaced ? 11 : 13, design: monospaced ? .monospaced : .default))
-                .foregroundStyle(monospaced ? .secondary : .primary)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(10)
-                .background(Color(NSColor.textBackgroundColor).opacity(0.5))
-                .clipShape(RoundedRectangle(cornerRadius: 8))
+            Group {
+                if rendersMarkdown {
+                    MarkdownResultView(markdown: text, fontSize: 13)
+                } else {
+                    Text(text)
+                        .font(.system(size: monospaced ? 11 : 13, design: monospaced ? .monospaced : .default))
+                        .foregroundStyle(monospaced ? .secondary : .primary)
+                        .textSelection(.enabled)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(10)
+            .background(Color(NSColor.textBackgroundColor).opacity(0.5))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
         }
     }
 }

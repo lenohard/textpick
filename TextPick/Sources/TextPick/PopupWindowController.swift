@@ -70,7 +70,7 @@ class PopupWindowController: NSWindowController {
         let opacity = UserDefaults.standard.double(forKey: "textpick.opacity")
         let panelOpacity = opacity > 0 ? opacity : 1.0
 
-        let panelHeight: CGFloat = displayMode == .compact ? 48 : 300
+        let panelHeight: CGFloat = displayMode == .compact ? 48 : 340
         let panel = NSPanel(
             contentRect: NSRect(x: 0, y: 0, width: panelWidth, height: panelHeight),
             styleMask: [
@@ -111,7 +111,7 @@ class PopupWindowController: NSWindowController {
         expandAction.handler = { [weak self, weak panel] in
             guard let self, let panel else { return }
             let w = savedWidth > 0 ? savedWidth : 420
-            panel.setContentSize(NSSize(width: w, height: 300))
+            panel.setContentSize(NSSize(width: w, height: 340))
             self.positionNearMouse(panel: panel)
         }
 

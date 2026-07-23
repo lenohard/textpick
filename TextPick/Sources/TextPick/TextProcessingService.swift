@@ -9,7 +9,16 @@ import Foundation
 ///   TEXTPICK_MODEL      — default: anthropic/claude-haiku-4.5
 actor TextProcessingService {
     static let shared = TextProcessingService()
-    private init() {}
+    /// Reuse one ephemeral session so repeated requests can reuse connections
+    /// while still avoiding persistent cookies/cache data.
+    private let urlSession: URLSession
+
+    private init() {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        configuration.httpMaximumConnectionsPerHost = 4
+        urlSession = URLSession(configuration: configuration)
+    }
 
     // MARK: - Configuration
 
@@ -162,11 +171,8 @@ actor TextProcessingService {
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         request.timeoutInterval = 120
 
-        let config = URLSessionConfiguration.ephemeral
-        config.httpAdditionalHeaders = ["Authorization": authHeader]
-        let session = URLSession(configuration: config)
         do {
-            let (bytes, response) = try await session.bytes(for: request)
+            let (bytes, response) = try await urlSession.bytes(for: request)
             guard let httpResponse = response as? HTTPURLResponse else { throw APIError.invalidResponse }
             guard httpResponse.statusCode == 200 else {
                 if httpResponse.statusCode == 401 { throw APIError.unauthorized }
@@ -198,11 +204,8 @@ actor TextProcessingService {
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         request.timeoutInterval = 60
 
-        let config = URLSessionConfiguration.ephemeral
-        config.httpAdditionalHeaders = ["Authorization": "Bearer \(key)"]
-        let session = URLSession(configuration: config)
         do {
-            let (data, response) = try await session.data(for: request)
+            let (data, response) = try await urlSession.data(for: request)
 
             guard let httpResponse = response as? HTTPURLResponse else { throw APIError.invalidResponse }
             guard httpResponse.statusCode == 200 else {
@@ -240,11 +243,8 @@ actor TextProcessingService {
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         request.timeoutInterval = 120
 
-        let config = URLSessionConfiguration.ephemeral
-        config.httpAdditionalHeaders = ["Authorization": authHeader]
-        let session = URLSession(configuration: config)
         do {
-            let (bytes, response) = try await session.bytes(for: request)
+            let (bytes, response) = try await urlSession.bytes(for: request)
 
             guard let httpResponse = response as? HTTPURLResponse else { throw APIError.invalidResponse }
             guard httpResponse.statusCode == 200 else {
@@ -308,12 +308,8 @@ actor TextProcessingService {
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         request.timeoutInterval = 30
 
-        // Use ephemeral session with auth in config to prevent header stripping
-        let config = URLSessionConfiguration.ephemeral
-        config.httpAdditionalHeaders = ["Authorization": authHeader]
-        let session = URLSession(configuration: config)
         do {
-            let (data, response) = try await session.data(for: request)
+            let (data, response) = try await urlSession.data(for: request)
 
             guard let httpResponse = response as? HTTPURLResponse else {
                 throw APIError.invalidResponse
@@ -370,11 +366,8 @@ actor TextProcessingService {
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         request.timeoutInterval = 120
 
-        let config = URLSessionConfiguration.ephemeral
-        config.httpAdditionalHeaders = ["Authorization": authHeader]
-        let session = URLSession(configuration: config)
         do {
-            let (bytes, response) = try await session.bytes(for: request)
+            let (bytes, response) = try await urlSession.bytes(for: request)
 
             guard let httpResponse = response as? HTTPURLResponse else {
                 throw APIError.invalidResponse
@@ -395,6 +388,9 @@ actor TextProcessingService {
     /// Shared SSE consumption for text + vision streaming.
     private func consumeSSEStream(bytes: URLSession.AsyncBytes, onUpdate: StreamHandler?) async throws -> StreamResult {
         var result = StreamResult()
+        var lastUpdateAt = Date.distantPast
+        var hasPendingUpdate = false
+
         for try await line in bytes.lines {
             try Task.checkCancellation()
             guard line.hasPrefix("data: ") else { continue }
@@ -417,9 +413,21 @@ actor TextProcessingService {
                 updated = true
             }
             if updated, let onUpdate {
-                let snapshot = result
-                await MainActor.run { onUpdate(snapshot) }
+                hasPendingUpdate = true
+                let now = Date()
+                // Providers can emit dozens of tiny SSE chunks per second.
+                // Coalesce them to ~20 UI updates/sec to keep SwiftUI responsive.
+                if now.timeIntervalSince(lastUpdateAt) >= 0.05 {
+                    let snapshot = result
+                    await MainActor.run { onUpdate(snapshot) }
+                    lastUpdateAt = now
+                    hasPendingUpdate = false
+                }
             }
+        }
+        if hasPendingUpdate, let onUpdate {
+            let snapshot = result
+            await MainActor.run { onUpdate(snapshot) }
         }
         if result.content.isEmpty && result.thinking.isEmpty {
             throw APIError.emptyResponse
@@ -537,7 +545,7 @@ actor TextProcessingService {
         var request = URLRequest(url: url)
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.timeoutInterval = 10
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await urlSession.data(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             throw APIError.invalidResponse
         }
