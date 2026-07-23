@@ -46,6 +46,11 @@ struct ActionsSettingsTab: View {
                     .onMove(perform: store.move)
                 }
                 .listStyle(.bordered)
+                .onAppear {
+                    if selectedID == nil, let first = store.actions.first {
+                        selectedID = first.id
+                    }
+                }
 
                 Divider()
 
@@ -445,6 +450,11 @@ struct VisionActionsSettingsTab: View {
                         .onMove(perform: store.moveVision)
                     }
                     .listStyle(.bordered)
+                    .onAppear {
+                        if selectedID == nil, let first = store.visionActions.first {
+                            selectedID = first.id
+                        }
+                    }
 
                     Divider()
                     HStack(spacing: 4) {

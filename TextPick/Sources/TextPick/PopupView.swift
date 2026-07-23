@@ -376,17 +376,10 @@ struct PopupView: View {
 
     @ViewBuilder
     private var resultBodyView: some View {
-        if isProcessing {
-            // Keep the hot streaming path cheap. Parse Markdown once when the
-            // response completes instead of rebuilding an attributed document
-            // for every incoming token.
-            Text(result)
-                .font(.system(size: CGFloat(fontSize)))
-                .lineSpacing(3)
-                .textSelection(.enabled)
-        } else {
-            MarkdownResultView(markdown: result, fontSize: CGFloat(fontSize))
-        }
+        // Markdown is rendered during streaming too. SSE updates are already
+        // coalesced in TextProcessingService, so this stays responsive while
+        // avoiding the confusing transition from raw syntax to formatted text.
+        MarkdownResultView(markdown: result, fontSize: CGFloat(fontSize))
     }
 
     // MARK: - Action Buttons (text mode)
@@ -761,7 +754,14 @@ struct MarkdownResultView: View {
     }
 
     private static func parse(_ value: String) -> AttributedString {
-        (try? AttributedString(markdown: value)) ?? AttributedString(value)
+        let normalized = value
+            // Some gateways/models return escaped line breaks in the content
+            // string instead of actual newlines. Markdown needs real newlines
+            // for paragraphs, lists, and fenced code blocks.
+            .replacingOccurrences(of: "\\r\\n", with: "\n")
+            .replacingOccurrences(of: "\\n", with: "\n")
+            .replacingOccurrences(of: "\\t", with: "\t")
+        return (try? AttributedString(markdown: normalized)) ?? AttributedString(normalized)
     }
 }
 
