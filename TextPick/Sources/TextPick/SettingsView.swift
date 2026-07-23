@@ -20,7 +20,7 @@ struct SettingsView: View {
             HistorySettingsTab()
                 .tabItem { Label("History", systemImage: "clock.arrow.circlepath") }
         }
-        .frame(width: 720, height: 580)
+        .frame(width: 760, height: 640)
         .padding(16)
     }
 }
@@ -556,209 +556,267 @@ struct APIAndModelTab: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("API Key").font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
-                HStack(spacing: 6) {
-                    if showKey {
-                        TextField("Paste your API key…", text: $apiKey)
-                            .textFieldStyle(.roundedBorder)
-                            .font(.system(size: 12, design: .monospaced))
-                    } else {
-                        SecureField("Paste your API key…", text: $apiKey)
-                            .textFieldStyle(.roundedBorder)
-                            .font(.system(size: 12, design: .monospaced))
-                    }
-                    Button(action: { showKey.toggle() }) {
-                        Image(systemName: showKey ? "eye.slash" : "eye")
-                            .foregroundStyle(.secondary)
-                            .font(.system(size: 12))
-                    }
-                    .buttonStyle(.plain)
-                }
-                if apiKey.isEmpty {
-                    Label("No key set — will use AI_GATEWAY_API_KEY env var if available", systemImage: "exclamationmark.triangle")
-                        .font(.caption2)
-                        .foregroundStyle(.orange)
-                } else {
-                    Text("Saved · \(apiKey.count) chars")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                }
-            }
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text("API Base URL").font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
-                TextField("https://ai-gateway.vercel.sh/v1  (default)", text: $apiURL)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(size: 12))
-            }
-
-            HStack(spacing: 8) {
-                Button(action: runTestConnection) {
-                    HStack(spacing: 4) {
-                        if isTesting { ProgressView().scaleEffect(0.6) }
-                        Text(isTesting ? "Testing…" : "Test Connection")
-                    }
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .disabled(isTesting)
-
-                if let status = testStatus {
-                    Image(systemName: testOK ? "checkmark.circle.fill" : "xmark.circle.fill")
-                        .foregroundStyle(testOK ? .green : .red)
-                        .font(.system(size: 12))
-                    Text(status)
-                        .font(.caption)
-                        .foregroundStyle(testOK ? .green : .red)
-                        .lineLimit(2)
-                }
-            }
-
-            Divider()
-
-            // Reasoning Effort
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Thinking / Reasoning").font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
-                HStack(spacing: 12) {
-                    Picker("Effort", selection: $reasoningEffort) {
-                        Text("Default (adaptive)").tag("")
-                        Text("Disabled").tag("none")
-                        Text("Low").tag("low")
-                        Text("Medium").tag("medium")
-                        Text("High").tag("high")
-                    }
-                    .labelsHidden()
-                    .frame(width: 180)
-
-                    Text(reasoningEffort.isEmpty
-                        ? "Model decides automatically"
-                        : "Forces reasoningEffort = \"\(reasoningEffort)\"")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                }
-            }
-
-            Divider()
-
-            HStack(alignment: .top, spacing: 12) {
-                modelSelectionCard(
-                    title: "Text Model",
-                    icon: "text.cursor",
-                    tint: .blue,
-                    selectedModel: model,
-                    customModel: $textCustomModel,
-                    useCustom: $useCustomTextModel,
-                    allowEmpty: false,
-                    emptyLabel: nil,
-                    onApplyCustom: { value in model = value },
-                    onClear: nil
-                )
-
-                modelSelectionCard(
-                    title: "Vision Model",
-                    icon: "eye",
-                    tint: .purple,
-                    selectedModel: visionModel,
-                    customModel: $visionCustomModel,
-                    useCustom: $useCustomVisionModel,
-                    allowEmpty: true,
-                    emptyLabel: "Same as text model",
-                    onApplyCustom: { value in visionModel = value },
-                    onClear: { visionModel = ""; useCustomVisionModel = false; visionCustomModel = "" }
-                )
-            }
-
-            Divider()
-
-            HStack {
-                Text("Model List").font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
-                Spacer()
-                if isLoading {
-                    ProgressView().scaleEffect(0.65)
-                } else {
-                    Button(action: fetchModels) {
-                        Label(fetchedModels.isEmpty ? "Load" : "Refresh", systemImage: "arrow.clockwise")
-                            .font(.caption)
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                }
-            }
-
-            if let err = fetchError {
-                Label(err, systemImage: "exclamationmark.triangle")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
-            }
-
-            if !fetchedModels.isEmpty {
-                HStack(spacing: 8) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "magnifyingglass").foregroundStyle(.secondary).font(.caption)
-                        TextField("Filter by id or name…", text: $searchText)
-                            .textFieldStyle(.plain)
-                            .font(.system(size: 12))
-                    }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Color(NSColor.controlBackgroundColor))
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
-                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.2)))
-
-                    Picker("Provider", selection: $selectedProvider) {
-                        ForEach(providers, id: \.self) { provider in
-                            Text(provider.capitalized).tag(provider)
-                        }
-                    }
-                    .frame(width: 150)
-
-                    Toggle("Vision only", isOn: $showVisionOnly)
-                        .toggleStyle(.checkbox)
-                        .font(.system(size: 12))
-                }
-
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 8) {
-                        ForEach(displayedModels) { m in
-                            ModelRow(
-                                id: m.id,
-                                label: m.displayName,
-                                note: m.provider,
-                                isSelected: model == m.id || visionModel == m.id,
-                                isTextSelected: model == m.id,
-                                isVisionSelected: visionModel == m.id,
-                                onSelectText: {
-                                    useCustomTextModel = false
-                                    textCustomModel = ""
-                                    model = m.id
-                                },
-                                onSelectVision: {
-                                    useCustomVisionModel = false
-                                    visionCustomModel = ""
-                                    visionModel = m.id
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                settingsCard("Connection", icon: "network") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        labeledField("API Key", note: apiKey.isEmpty ? "Uses AI_GATEWAY_API_KEY from the environment when empty." : "Saved · \(apiKey.count) characters") {
+                            HStack(spacing: 6) {
+                                if showKey {
+                                    TextField("Paste your API key…", text: $apiKey)
+                                        .textFieldStyle(.roundedBorder)
+                                        .font(.system(size: 12, design: .monospaced))
+                                } else {
+                                    SecureField("Paste your API key…", text: $apiKey)
+                                        .textFieldStyle(.roundedBorder)
+                                        .font(.system(size: 12, design: .monospaced))
                                 }
-                            )
+                                Button(action: { showKey.toggle() }) {
+                                    Image(systemName: showKey ? "eye.slash" : "eye")
+                                        .foregroundStyle(.secondary)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+
+                        labeledField("API Base URL", note: "Leave empty to use the default Vercel AI Gateway URL.") {
+                            HStack(spacing: 6) {
+                                TextField("https://ai-gateway.vercel.sh/v1", text: $apiURL)
+                                    .textFieldStyle(.roundedBorder)
+                                    .font(.system(size: 12))
+                                if !apiURL.isEmpty {
+                                    Button("Default") { apiURL = "" }
+                                        .buttonStyle(.borderless)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+
+                        HStack(spacing: 8) {
+                            Button(action: runTestConnection) {
+                                HStack(spacing: 5) {
+                                    if isTesting { ProgressView().scaleEffect(0.6) }
+                                    Text(isTesting ? "Testing…" : "Test Connection")
+                                }
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.small)
+                            .disabled(isTesting)
+
+                            if let status = testStatus {
+                                Label(status, systemImage: testOK ? "checkmark.circle.fill" : "xmark.circle.fill")
+                                    .font(.caption)
+                                    .foregroundStyle(testOK ? .green : .red)
+                                    .lineLimit(2)
+                            }
                         }
                     }
-                    .padding(.vertical, 4)
                 }
-                .background(Color(NSColor.controlBackgroundColor))
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.2)))
-            } else if !isLoading {
-                Text("Click \"Load\" to fetch available models.")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-                    .frame(maxWidth: .infinity)
+
+                settingsCard("Generation", icon: "dial.medium") {
+                    HStack(spacing: 14) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Thinking / Reasoning")
+                                .font(.system(size: 13, weight: .medium))
+                            Text("Controls how much reasoning the model performs.")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        }
+                        Spacer(minLength: 12)
+                        Picker("Effort", selection: $reasoningEffort) {
+                            Text("Default (adaptive)").tag("")
+                            Text("Disabled").tag("none")
+                            Text("Low").tag("low")
+                            Text("Medium").tag("medium")
+                            Text("High").tag("high")
+                        }
+                        .labelsHidden()
+                        .frame(width: 190)
+                    }
+                }
+
+                settingsCard("Models", icon: "cpu") {
+                    HStack(alignment: .top, spacing: 12) {
+                        modelSelectionCard(
+                            title: "Text Model",
+                            icon: "text.cursor",
+                            tint: .blue,
+                            selectedModel: model,
+                            customModel: $textCustomModel,
+                            useCustom: $useCustomTextModel,
+                            allowEmpty: false,
+                            emptyLabel: nil,
+                            onApplyCustom: { value in model = value },
+                            onClear: nil
+                        )
+
+                        modelSelectionCard(
+                            title: "Vision Model",
+                            icon: "eye",
+                            tint: .purple,
+                            selectedModel: visionModel,
+                            customModel: $visionCustomModel,
+                            useCustom: $useCustomVisionModel,
+                            allowEmpty: true,
+                            emptyLabel: "Same as text model",
+                            onApplyCustom: { value in visionModel = value },
+                            onClear: { visionModel = ""; useCustomVisionModel = false; visionCustomModel = "" }
+                        )
+                    }
+                }
+
+                settingsCard("Model Browser", icon: "list.bullet.rectangle") {
+                    HStack(alignment: .center, spacing: 8) {
+                        Text("Available models")
+                            .font(.system(size: 13, weight: .medium))
+                        if !fetchedModels.isEmpty {
+                            Text("\(displayedModels.count) shown")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                        }
+                        Spacer()
+                        if isLoading {
+                            ProgressView().scaleEffect(0.65)
+                        } else {
+                            Button(action: fetchModels) {
+                                Label(fetchedModels.isEmpty ? "Load" : "Refresh", systemImage: "arrow.clockwise")
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                        }
+                    }
+
+                    if let err = fetchError {
+                        Label(err, systemImage: "exclamationmark.triangle")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                            .padding(.top, 6)
+                    }
+
+                    if !fetchedModels.isEmpty {
+                        HStack(spacing: 8) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "magnifyingglass")
+                                    .foregroundStyle(.secondary)
+                                TextField("Search by id or name…", text: $searchText)
+                                    .textFieldStyle(.plain)
+                                    .font(.system(size: 12))
+                            }
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 6)
+                            .background(Color(NSColor.textBackgroundColor))
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 6)
+                                    .stroke(Color.secondary.opacity(0.18), lineWidth: 1)
+                            }
+
+                            Picker("Provider", selection: $selectedProvider) {
+                                ForEach(providers, id: \.self) { provider in
+                                    Text(provider.capitalized).tag(provider)
+                                }
+                            }
+                            .frame(width: 135)
+
+                            Toggle("Vision", isOn: $showVisionOnly)
+                                .toggleStyle(.checkbox)
+                                .font(.system(size: 12))
+                        }
+                        .padding(.top, 8)
+
+                        LazyVStack(alignment: .leading, spacing: 3) {
+                            ForEach(displayedModels) { m in
+                                ModelRow(
+                                    id: m.id,
+                                    label: m.displayName,
+                                    note: m.provider,
+                                    isSelected: model == m.id || visionModel == m.id,
+                                    isTextSelected: model == m.id,
+                                    isVisionSelected: visionModel == m.id,
+                                    onSelectText: {
+                                        useCustomTextModel = false
+                                        textCustomModel = ""
+                                        model = m.id
+                                    },
+                                    onSelectVision: {
+                                        useCustomVisionModel = false
+                                        visionCustomModel = ""
+                                        visionModel = m.id
+                                    }
+                                )
+                                if m.id != displayedModels.last?.id { Divider().opacity(0.35) }
+                            }
+                        }
+                        .padding(.vertical, 4)
+                        .background(Color(NSColor.controlBackgroundColor).opacity(0.65))
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(Color.secondary.opacity(0.16), lineWidth: 1)
+                        }
+                        .padding(.top, 8)
+                    } else if !isLoading {
+                        Text("Load the model list to browse available providers and capabilities.")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.top, 8)
+                    }
+                }
             }
+            .padding(.horizontal, 4)
+            .padding(.vertical, 6)
         }
-        .padding(4)
         .onAppear {
             loadCachedModels()
             syncCustomModelState()
             if fetchedModels.isEmpty { fetchModels() }
+        }
+    }
+
+    @ViewBuilder
+    private func settingsCard<Content: View>(
+        _ title: String,
+        icon: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Label(title, systemImage: icon)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .padding(.bottom, 10)
+            content()
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(NSColor.controlBackgroundColor).opacity(0.55))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(Color.secondary.opacity(0.14), lineWidth: 1)
+        }
+    }
+
+    @ViewBuilder
+    private func labeledField<Control: View>(
+        _ title: String,
+        note: String,
+        @ViewBuilder control: () -> Control
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.system(size: 12, weight: .medium))
+            control()
+            if apiKey.isEmpty && title == "API Key" {
+                Text(note)
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+            } else {
+                Text(note)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
         }
     }
 
@@ -791,12 +849,12 @@ struct APIAndModelTab: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
                 Image(systemName: icon).foregroundStyle(tint)
-                Text(title).font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
+                Text(title).font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary)
             }
 
             HStack(spacing: 6) {
                 Text(selectedModel.isEmpty ? (emptyLabel ?? "Not set") : selectedModel)
-                    .font(.system(size: 12, design: .monospaced))
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Spacer()
@@ -820,22 +878,41 @@ struct APIAndModelTab: View {
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 6)
-            .background(Color(NSColor.controlBackgroundColor))
+            .background(Color(NSColor.textBackgroundColor))
             .clipShape(RoundedRectangle(cornerRadius: 6))
+            .overlay {
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(tint.opacity(0.18), lineWidth: 1)
+            }
 
             HStack(spacing: 8) {
-                Toggle("Custom ID", isOn: useCustom)
+                Toggle("Custom model ID", isOn: useCustom)
                     .toggleStyle(.checkbox)
                     .font(.system(size: 12))
-                TextField("provider/model-name", text: customModel)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(size: 12))
-                    .disabled(!useCustom.wrappedValue)
-                    .onSubmit {
+                if useCustom.wrappedValue {
+                    TextField("provider/model-name", text: customModel)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(size: 12, design: .monospaced))
+                        .onSubmit {
+                            let value = customModel.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                            if !value.isEmpty { onApplyCustom(value) }
+                        }
+                    Button("Use") {
                         let value = customModel.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines)
                         if !value.isEmpty { onApplyCustom(value) }
                     }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(customModel.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
             }
+        }
+        .padding(10)
+        .background(Color.secondary.opacity(0.045))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(Color.secondary.opacity(0.12), lineWidth: 1)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -910,65 +987,43 @@ struct HotkeySettingsTab: View {
     @State private var keyMonitor: Any? = nil
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Trigger Hotkey")
-                    .font(.subheadline.weight(.medium))
-                Text("Press this combination anywhere to open TextPick")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            // Current hotkey + record on one row
+        VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
-                hotkeyBadge(isRecording ? (pendingConfig?.displayString ?? "…") : config.displayString,
-                            highlighted: !isRecording)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Current shortcut")
+                        .font(.system(size: 13, weight: .medium))
+                    Text("Press it anywhere to open TextPick")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer(minLength: 12)
+
+                hotkeyBadge(
+                    isRecording ? (pendingConfig?.displayString ?? "Press keys…") : config.displayString,
+                    highlighted: !isRecording
+                )
 
                 Button(action: isRecording ? stopRecording : startRecording) {
-                    HStack(spacing: 6) {
-                        Circle()
-                            .fill(isRecording ? Color.red : Color.clear)
-                            .frame(width: 8, height: 8)
-                            .overlay(
-                                Circle()
-                                    .strokeBorder(isRecording ? Color.red : Color.secondary, lineWidth: 1.5)
-                            )
-                        Text(isRecording ? "Listening…" : "Record")
-                            .font(.system(size: 13, weight: .medium))
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(isRecording ? Color.red.opacity(0.08) : Color(NSColor.controlBackgroundColor))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .stroke(isRecording ? Color.red.opacity(0.35) : Color.secondary.opacity(0.25), lineWidth: 1)
-                            )
-                    )
+                    Label(isRecording ? "Listening…" : "Record", systemImage: isRecording ? "record.circle" : "keyboard")
                 }
-                .buttonStyle(.plain)
-                .animation(.easeInOut(duration: 0.15), value: isRecording)
-
-                if isRecording {
-                    Text("Esc to cancel")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                }
-
-                Spacer(minLength: 0)
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .tint(isRecording ? .red : nil)
             }
 
-            if let pending = pendingConfig, !isRecording {
+            if isRecording {
+                Text("Hold at least one modifier with a key · Esc to cancel")
+                    .font(.caption2)
+                    .foregroundStyle(.red)
+            } else if let pending = pendingConfig {
                 HStack(spacing: 8) {
                     Image(systemName: "checkmark.circle.fill")
                         .foregroundStyle(.green)
-                        .font(.system(size: 12))
-                    hotkeyBadge(pending.displayString, highlighted: true)
-                    Text("recorded")
+                    Text("New shortcut")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Spacer(minLength: 0)
+                    hotkeyBadge(pending.displayString, highlighted: true)
+                    Spacer(minLength: 4)
                     Button("Discard") { pendingConfig = nil }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
@@ -979,65 +1034,39 @@ struct HotkeySettingsTab: View {
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
                 }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Color.green.opacity(0.05))
-                )
-                .transition(.opacity.combined(with: .move(edge: .top)))
-                .animation(.spring(duration: 0.2), value: pendingConfig != nil)
+                .padding(.top, 2)
             }
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Hold ⌃ ⌥ ⇧ ⌘ + any key. At least one modifier required.")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-                Text("If the hotkey doesn't work, it may conflict with another app's shortcut.")
-                    .font(.caption2)
-                    .foregroundStyle(.orange.opacity(0.8))
-            }
-
-            Spacer()
-
-            HStack {
+            HStack(spacing: 8) {
                 Button {
                     applyConfig(HotkeyConfig.default)
                     pendingConfig = nil
                 } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: "arrow.counterclockwise")
-                            .font(.system(size: 10))
-                        Text("Reset to \(HotkeyConfig.default.displayString)")
-                    }
+                    Label("Reset to \(HotkeyConfig.default.displayString)", systemImage: "arrow.counterclockwise")
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.borderless)
                 .controlSize(.small)
+                .foregroundStyle(.secondary)
                 .disabled(config == HotkeyConfig.default)
 
                 Spacer()
 
-                HStack(spacing: 4) {
-                    Circle()
-                        .fill(Color.green)
-                        .frame(width: 6, height: 6)
-                    Text("Takes effect immediately")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
+                Label("Takes effect immediately", systemImage: "checkmark.circle.fill")
+                    .font(.caption2)
+                    .foregroundStyle(.green)
             }
         }
-        .padding(20)
+        .padding(.vertical, 2)
         .onDisappear { stopRecording() }
     }
 
     @ViewBuilder
     private func hotkeyBadge(_ label: String, highlighted: Bool) -> some View {
         Text(label)
-            .font(.system(size: 14, weight: .semibold, design: .rounded))
+            .font(.system(size: 13, weight: .semibold, design: .rounded))
             .tracking(0.5)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 4)
             .background(
                 RoundedRectangle(cornerRadius: 8)
                     .fill(highlighted ? Color.accentColor.opacity(0.08) : Color.secondary.opacity(0.08))

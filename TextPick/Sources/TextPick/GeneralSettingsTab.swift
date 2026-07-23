@@ -5,179 +5,150 @@ import ServiceManagement
 // MARK: - General Settings Tab
 
 struct GeneralSettingsTab: View {
-    // Appearance
     @AppStorage("textpick.opacity")       private var opacity:     Double = 1.0
     @AppStorage("textpick.popupWidth")    private var popupWidth:  Double = 420
     @AppStorage("textpick.fontSize")      private var fontSize:    Double = 13
     @AppStorage("textpick.colorScheme")   private var colorScheme: String = "system"
 
-    // Behaviour
-    @AppStorage("textpick.autoCopy")           private var autoCopy:           Bool = false
-    @AppStorage("textpick.showInputText")      private var showInputText:       Bool = true
-    @AppStorage("textpick.closeOnEsc")         private var closeOnEsc:          Bool = true
-    @AppStorage("textpick.switchToResult")     private var switchToResult:      Bool = true
-    @AppStorage("textpick.captureMethod")      private var captureMethod:       String = "ax_first"
+    @AppStorage("textpick.autoCopy")            private var autoCopy: Bool = false
+    @AppStorage("textpick.showInputText")       private var showInputText: Bool = true
+    @AppStorage("textpick.closeOnEsc")          private var closeOnEsc: Bool = true
+    @AppStorage("textpick.switchToResult")      private var switchToResult: Bool = true
+    @AppStorage("textpick.captureMethod")       private var captureMethod: String = "ax_first"
     @AppStorage("textpick.autoShowOnSelection") private var autoShowOnSelection: Bool = false
     @AppStorage("textpick.selectionTriggerStyle") private var selectionTriggerStyle: String = "compact"
-    @AppStorage("textpick.launchAtLogin")      private var launchAtLogin:      Bool = false
+    @AppStorage("textpick.launchAtLogin")       private var launchAtLogin: Bool = false
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-                
-                // ── Hotkey ───────────────────────────────────────────
-                sectionHeader("Global Hotkey", icon: "keyboard")
-                    .padding(.bottom, 8)
-                
-                HotkeySettingsTab()
-                    .frame(minHeight: 160)
-                    .background(Color(NSColor.controlBackgroundColor).opacity(0.5))
-                    .cornerRadius(8)
-                    .padding(.horizontal, 4)
-                
-                sectionDivider()
-                    .padding(.top, 16)
+            VStack(alignment: .leading, spacing: 12) {
+                settingsCard("Global Hotkey", icon: "keyboard") {
+                    HotkeySettingsTab()
+                }
 
-                // ── Appearance ───────────────────────────────────────
-                sectionHeader("Appearance", icon: "paintbrush")
-
-                settingRow("Popup Opacity", note: "Affects the floating popup window.") {
-                    HStack(spacing: 10) {
-                        Slider(value: $opacity, in: 0.4...1.0, step: 0.05)
-                            .frame(width: 160)
-                        Text("\(Int(opacity * 100))%")
-                            .font(.system(size: 12, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 36, alignment: .trailing)
+                settingsCard("Appearance", icon: "paintbrush") {
+                    settingRow("Popup Opacity", note: "Controls the floating result window.") {
+                        HStack(spacing: 10) {
+                            Slider(value: $opacity, in: 0.4...1.0, step: 0.05)
+                                .frame(width: 170)
+                            valueLabel("\(Int(opacity * 100))%", width: 42)
+                        }
                     }
-                }
-
-                settingRow("Popup Width", note: nil) {
-                    HStack(spacing: 10) {
-                        Slider(value: $popupWidth, in: 320...700, step: 10)
-                            .frame(width: 160)
-                        Text("\(Int(popupWidth)) px")
-                            .font(.system(size: 12, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 52, alignment: .trailing)
+                    rowDivider()
+                    settingRow("Popup Width", note: "Adjust the default popup width.") {
+                        HStack(spacing: 10) {
+                            Slider(value: $popupWidth, in: 320...700, step: 10)
+                                .frame(width: 170)
+                            valueLabel("\(Int(popupWidth)) px", width: 58)
+                        }
                     }
-                }
-
-                settingRow("Content Font Size", note: nil) {
-                    HStack(spacing: 10) {
-                        Slider(value: $fontSize, in: 10...18, step: 1)
-                            .frame(width: 160)
-                        Text("\(Int(fontSize)) pt")
-                            .font(.system(size: 12, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 36, alignment: .trailing)
+                    rowDivider()
+                    settingRow("Content Font Size", note: "Changes text in the popup content area.") {
+                        HStack(spacing: 10) {
+                            Slider(value: $fontSize, in: 10...18, step: 1)
+                                .frame(width: 170)
+                            valueLabel("\(Int(fontSize)) pt", width: 42)
+                        }
                     }
-                }
-
-                settingRow("Appearance", note: "Overrides system appearance for the popup.") {
-                    Picker("", selection: $colorScheme) {
-                        Text("System").tag("system")
-                        Text("Light").tag("light")
-                        Text("Dark").tag("dark")
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(width: 200)
-                    .labelsHidden()
-                    .onChange(of: colorScheme, perform: applyColorScheme)
-                }
-
-                sectionDivider()
-
-                // ── Behaviour ────────────────────────────────────────
-                sectionHeader("Behaviour", icon: "gearshape")
-
-                settingRow("Auto-copy Result", note: "Copies LLM result to clipboard automatically.") {
-                    Toggle("", isOn: $autoCopy).labelsHidden()
-                }
-
-                settingRow("Show Input Text", note: "Show the captured text above action buttons.") {
-                    Toggle("", isOn: $showInputText).labelsHidden()
-                }
-
-                settingRow("Switch to Result View", note: "Automatically switch to result tab when processing starts.") {
-                    Toggle("", isOn: $switchToResult).labelsHidden()
-                }
-
-                settingRow("Close on Escape", note: nil) {
-                    Toggle("", isOn: $closeOnEsc).labelsHidden()
-                }
-
-                settingRow("Auto-show on Selection", note: "Show TextPick when you select text in any app.") {
-                    Toggle("", isOn: $autoShowOnSelection).labelsHidden()
-                }
-
-                if autoShowOnSelection {
-                    settingRow("Selection Style", note: "Compact bar is less intrusive; full popup shows input text and custom prompt.") {
-                        Picker("", selection: $selectionTriggerStyle) {
-                            Text("Compact action bar").tag("compact")
-                            Text("Full popup").tag("popup")
+                    rowDivider()
+                    settingRow("Color Scheme", note: "Overrides the system appearance for the popup.") {
+                        Picker("", selection: $colorScheme) {
+                            Text("System").tag("system")
+                            Text("Light").tag("light")
+                            Text("Dark").tag("dark")
                         }
                         .pickerStyle(.segmented)
-                        .frame(width: 260)
+                        .frame(width: 210)
                         .labelsHidden()
+                        .onChange(of: colorScheme, perform: applyColorScheme)
                     }
                 }
 
-                sectionDivider()
-
-                // ── Text Capture ─────────────────────────────────────
-                sectionHeader("Text Capture", icon: "text.cursor")
-
-                settingRow("Capture Method", note: "AX = no clipboard disruption. Clipboard fallback copies via ⌘C.") {
-                    Picker("", selection: $captureMethod) {
-                        Text("Accessibility first").tag("ax_first")
-                        Text("Clipboard only").tag("clipboard")
-                        Text("Accessibility only").tag("ax_only")
+                settingsCard("Behaviour", icon: "gearshape") {
+                    settingRow("Auto-copy Result", note: "Copy the generated result to the clipboard.") {
+                        compactToggle($autoCopy)
                     }
-                    .pickerStyle(.menu)
-                    .frame(width: 200)
-                    .labelsHidden()
-                }
-
-                sectionDivider()
-
-                // ── System ───────────────────────────────────────────
-                sectionHeader("System", icon: "power")
-
-                settingRow("Launch at Login", note: "Start TextPick automatically when you log in.") {
-                    Toggle("", isOn: $launchAtLogin)
-                        .labelsHidden()
-                        .onChange(of: launchAtLogin) { newValue in
-                            toggleLaunchAtLogin(newValue)
+                    rowDivider()
+                    settingRow("Show Input Text", note: "Show captured text above the action buttons.") {
+                        compactToggle($showInputText)
+                    }
+                    rowDivider()
+                    settingRow("Switch to Result", note: "Open the result view as soon as processing starts.") {
+                        compactToggle($switchToResult)
+                    }
+                    rowDivider()
+                    settingRow("Close on Escape", note: "Dismiss the popup with the Escape key.") {
+                        compactToggle($closeOnEsc)
+                    }
+                    rowDivider()
+                    settingRow("Auto-show on Selection", note: "Show TextPick whenever text is selected.") {
+                        compactToggle($autoShowOnSelection)
+                    }
+                    if autoShowOnSelection {
+                        rowDivider()
+                        settingRow("Selection Style", note: "Choose a compact bar or the complete popup.") {
+                            Picker("", selection: $selectionTriggerStyle) {
+                                Text("Compact Bar").tag("compact")
+                                Text("Full Popup").tag("popup")
+                            }
+                            .pickerStyle(.segmented)
+                            .frame(width: 230)
+                            .labelsHidden()
                         }
+                    }
                 }
 
-                Spacer(minLength: 16)
+                settingsCard("Capture & System", icon: "text.cursor") {
+                    settingRow("Capture Method", note: "Accessibility avoids changing the clipboard.") {
+                        Picker("", selection: $captureMethod) {
+                            Text("Accessibility first").tag("ax_first")
+                            Text("Clipboard only").tag("clipboard")
+                            Text("Accessibility only").tag("ax_only")
+                        }
+                        .pickerStyle(.menu)
+                        .frame(width: 200)
+                        .labelsHidden()
+                    }
+                    rowDivider()
+                    settingRow("Launch at Login", note: "Start TextPick automatically after login.") {
+                        Toggle("", isOn: $launchAtLogin)
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                            .controlSize(.small)
+                            .onChange(of: launchAtLogin) { newValue in
+                                toggleLaunchAtLogin(newValue)
+                            }
+                    }
+                }
             }
             .padding(.horizontal, 4)
+            .padding(.vertical, 6)
         }
     }
 
     // MARK: - Helpers
 
     @ViewBuilder
-    private func sectionHeader(_ title: String, icon: String) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: icon)
-                .font(.system(size: 11, weight: .semibold))
+    private func settingsCard<Content: View>(
+        _ title: String,
+        icon: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Label(title, systemImage: icon)
+                .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.secondary)
-            Text(title.uppercased())
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .tracking(0.8)
+                .padding(.bottom, 8)
+            content()
         }
-        .padding(.top, 16)
-        .padding(.bottom, 6)
-        .padding(.horizontal, 4)
-    }
-
-    private func sectionDivider() -> some View {
-        Divider().padding(.vertical, 4)
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(NSColor.controlBackgroundColor).opacity(0.55))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(Color.secondary.opacity(0.14), lineWidth: 1)
+        }
     }
 
     @ViewBuilder
@@ -186,31 +157,47 @@ struct GeneralSettingsTab: View {
         note: String? = nil,
         @ViewBuilder control: () -> Control
     ) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack(alignment: .center) {
+        HStack(alignment: .center, spacing: 16) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(label)
-                    .font(.system(size: 13))
-                    .frame(width: 160, alignment: .leading)
-                control()
-                Spacer()
+                    .font(.system(size: 13, weight: .medium))
+                if let note {
+                    Text(note)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
-            if let note {
-                Text(note)
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                    .padding(.leading, 164)
-            }
+            Spacer(minLength: 12)
+            control()
         }
-        .padding(.vertical, 5)
-        .padding(.horizontal, 4)
+        .padding(.vertical, 6)
+    }
+
+    private func rowDivider() -> some View {
+        Divider().opacity(0.55)
+    }
+
+    private func valueLabel(_ value: String, width: CGFloat) -> some View {
+        Text(value)
+            .font(.system(size: 12, design: .monospaced))
+            .foregroundStyle(.secondary)
+            .frame(width: width, alignment: .trailing)
+    }
+
+    private func compactToggle(_ binding: Binding<Bool>) -> some View {
+        Toggle("", isOn: binding)
+            .labelsHidden()
+            .toggleStyle(.switch)
+            .controlSize(.small)
     }
 
     private func applyColorScheme(_ value: String) {
         guard let app = NSApp else { return }
         switch value {
         case "light": app.appearance = NSAppearance(named: .aqua)
-        case "dark":  app.appearance = NSAppearance(named: .darkAqua)
-        default:      app.appearance = nil
+        case "dark": app.appearance = NSAppearance(named: .darkAqua)
+        default: app.appearance = nil
         }
     }
 
