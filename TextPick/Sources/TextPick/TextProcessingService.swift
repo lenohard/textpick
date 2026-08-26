@@ -52,6 +52,38 @@ actor TextProcessingService {
         UserDefaults.standard.string(forKey: "textpick.reasoningEffort")?.nilIfEmpty ?? ""
     }
 
+    var apiProtocol: APIProtocol {
+        let raw = UserDefaults.standard.string(forKey: "textpick.apiProtocol")?.nilIfEmpty
+            ?? ProcessInfo.processInfo.environment["TEXTPICK_API_PROTOCOL"]
+            ?? "chat-completions"
+        return APIProtocol(rawValue: raw) ?? .chatCompletions
+    }
+
+    // MARK: - API Protocol
+
+    /// Supported API protocol formats.
+    enum APIProtocol: String, CaseIterable, Codable, Sendable {
+        case chatCompletions = "chat-completions"
+        case messages = "messages"
+        case responses = "responses"
+
+        var path: String {
+            switch self {
+            case .chatCompletions: return "/chat/completions"
+            case .messages:       return "/messages"
+            case .responses:      return "/responses"
+            }
+        }
+
+        var displayName: String {
+            switch self {
+            case .chatCompletions: return "Chat Completions"
+            case .messages:       return "Messages (Anthropic)"
+            case .responses:      return "Responses"
+            }
+        }
+    }
+
     // MARK: - Public API
 
     struct StreamResult: Sendable {
@@ -149,25 +181,17 @@ actor TextProcessingService {
         let key = apiKey
         let url_base = baseURL
         let mdl = overrideModel ?? model
+        let proto = apiProtocol
         guard !key.isEmpty else { throw APIError.missingAPIKey }
-        guard let url = URL(string: "\(url_base)/chat/completions") else { throw APIError.invalidURL }
+        guard let url = URL(string: "\(url_base)\(proto.path)") else { throw APIError.invalidURL }
         guard !messages.isEmpty else { throw APIError.emptyInput }
 
-        var body: [String: Any] = [
-            "model": mdl,
-            "messages": messages,
-            "temperature": 0.3,
-            "stream": true,
-        ]
-        if !reasoningEffort.isEmpty {
-            body["reasoningEffort"] = reasoningEffort
-        }
+        let body = makeRequestBody(protocol: proto, model: mdl, messages: messages, stream: true, reasoningEffort: reasoningEffort)
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        let authHeader = "Bearer \(key)"
-        request.setValue(authHeader, forHTTPHeaderField: "Authorization")
+        setAuthHeaders(on: &request, key: key, protocol: proto)
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         request.timeoutInterval = 120
 
@@ -180,7 +204,7 @@ actor TextProcessingService {
                 for try await line in bytes.lines { errorBody += line }
                 throw APIError.httpError(httpResponse.statusCode, errorBody)
             }
-            return try await consumeSSEStream(bytes: bytes, onUpdate: onUpdate)
+            return try await consumeSSEStream(bytes: bytes, onUpdate: onUpdate, protocol: proto)
         } catch let error as URLError {
             throw APIError.fromURLError(error)
         }
@@ -192,15 +216,16 @@ actor TextProcessingService {
         let key = apiKey
         let url_base = baseURL
         let mdl = visionModel
+        let proto = apiProtocol
         guard !key.isEmpty else { throw APIError.missingAPIKey }
-        guard let url = URL(string: "\(url_base)/chat/completions") else { throw APIError.invalidURL }
+        guard let url = URL(string: "\(url_base)\(proto.path)") else { throw APIError.invalidURL }
 
-        let body: [String: Any] = visionRequestBody(imageData: imageData, prompt: prompt, model: mdl)
+        let body: [String: Any] = visionRequestBody(imageData: imageData, prompt: prompt, model: mdl, protocol: proto)
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        setAuthHeaders(on: &request, key: key, protocol: proto)
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         request.timeoutInterval = 60
 
@@ -214,10 +239,7 @@ actor TextProcessingService {
                 throw APIError.httpError(httpResponse.statusCode, body)
             }
 
-            let decoded = try JSONDecoder().decode(OpenAIChatResponse.self, from: data)
-            let content = decoded.choices.first?.message.content ?? ""
-            if content.isEmpty { throw APIError.emptyResponse }
-            return content
+            return try extractContent(from: data, protocol: proto)
         } catch let error as URLError {
             throw APIError.fromURLError(error)
         }
@@ -229,17 +251,17 @@ actor TextProcessingService {
         let key = apiKey
         let url_base = baseURL
         let mdl = visionModel
+        let proto = apiProtocol
         guard !key.isEmpty else { throw APIError.missingAPIKey }
-        guard let url = URL(string: "\(url_base)/chat/completions") else { throw APIError.invalidURL }
+        guard let url = URL(string: "\(url_base)\(proto.path)") else { throw APIError.invalidURL }
 
-        var body = visionRequestBody(imageData: imageData, prompt: prompt, model: mdl)
+        var body = visionRequestBody(imageData: imageData, prompt: prompt, model: mdl, protocol: proto)
         body["stream"] = true
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        let authHeader = "Bearer \(key)"
-        request.setValue(authHeader, forHTTPHeaderField: "Authorization")
+        setAuthHeaders(on: &request, key: key, protocol: proto)
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         request.timeoutInterval = 120
 
@@ -254,57 +276,69 @@ actor TextProcessingService {
                 throw APIError.httpError(httpResponse.statusCode, errorBody)
             }
 
-            return try await consumeSSEStream(bytes: bytes, onUpdate: onUpdate)
+            return try await consumeSSEStream(bytes: bytes, onUpdate: onUpdate, protocol: apiProtocol)
         } catch let error as URLError {
             throw APIError.fromURLError(error)
         }
     }
 
-    /// Builds the OpenAI vision-format request body (shared by streaming + non-streaming).
-    private func visionRequestBody(imageData: Data, prompt: String, model mdl: String) -> [String: Any] {
+    /// Builds the vision-format request body (shared by streaming + non-streaming).
+    private func visionRequestBody(imageData: Data, prompt: String, model mdl: String, protocol proto: APIProtocol = .chatCompletions) -> [String: Any] {
         let base64 = imageData.base64EncodedString()
-        let imageURL = "data:image/png;base64,\(base64)"
-        let userContent: [[String: Any]] = [
-            ["type": "image_url", "image_url": ["url": imageURL]],
-            ["type": "text", "text": prompt]
-        ]
-        var body: [String: Any] = [
-            "model": mdl,
-            "messages": [["role": "user", "content": userContent]],
-        ]
-        if !reasoningEffort.isEmpty {
-            body["reasoningEffort"] = reasoningEffort
+
+        switch proto {
+        case .messages:
+            // Anthropic Messages API: source block for images
+            let userContent: [[String: Any]] = [
+                ["type": "image", "source": ["type": "base64", "media_type": "image/png", "data": base64]],
+                ["type": "text", "text": prompt]
+            ]
+            var body: [String: Any] = [
+                "model": mdl,
+                "messages": [["role": "user", "content": userContent]],
+                "max_tokens": 4096,
+            ]
+            return body
+
+        default:
+            // Chat Completions / Responses: image_url format
+            let imageURL = "data:image/png;base64,\(base64)"
+            let userContent: [[String: Any]] = [
+                ["type": "image_url", "image_url": ["url": imageURL]],
+                ["type": "text", "text": prompt]
+            ]
+            var body: [String: Any] = [
+                "model": mdl,
+                "messages": [["role": "user", "content": userContent]],
+            ]
+            if !reasoningEffort.isEmpty {
+                body["reasoningEffort"] = reasoningEffort
+            }
+            return body
         }
-        return body
     }
 
-    // MARK: - API Call (OpenAI-compatible)
+    // MARK: - API Call (protocol-aware)
 
     private func callAPI(system: String, user: String) async throws -> String {
         let key = apiKey
         let url_base = baseURL
+        let proto = apiProtocol
+        let mdl = model
         guard !key.isEmpty else { throw APIError.missingAPIKey }
-        guard let url = URL(string: "\(url_base)/chat/completions") else { throw APIError.invalidURL }
+        guard let url = URL(string: "\(url_base)\(proto.path)") else { throw APIError.invalidURL }
 
-        var messages: [[String: String]] = []
+        var messages: [[String: Any]] = []
         if !system.isEmpty { messages.append(["role": "system", "content": system]) }
         if !user.isEmpty   { messages.append(["role": "user",   "content": user]) }
         if messages.isEmpty { throw APIError.emptyInput }
 
-        var body: [String: Any] = [
-            "model": model,
-            "messages": messages,
-            "temperature": 0.3,
-        ]
-        if !reasoningEffort.isEmpty {
-            body["reasoningEffort"] = reasoningEffort
-        }
+        let body = makeRequestBody(protocol: proto, model: mdl, messages: messages, stream: false, reasoningEffort: reasoningEffort)
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        let authHeader = "Bearer \(key)"
-        request.setValue(authHeader, forHTTPHeaderField: "Authorization")
+        setAuthHeaders(on: &request, key: key, protocol: proto)
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         request.timeoutInterval = 30
 
@@ -320,10 +354,7 @@ actor TextProcessingService {
                 throw APIError.httpError(httpResponse.statusCode, body)
             }
 
-            let decoded = try JSONDecoder().decode(OpenAIChatResponse.self, from: data)
-            let content = decoded.choices.first?.message.content ?? ""
-            if content.isEmpty { throw APIError.emptyResponse }
-            return content
+            return try extractContent(from: data, protocol: proto)
         } catch let error as URLError {
             throw APIError.fromURLError(error)
         }
@@ -340,29 +371,21 @@ actor TextProcessingService {
         let key = apiKey
         let url_base = baseURL
         let mdl = overrideModel ?? model
+        let proto = apiProtocol
         guard !key.isEmpty else { throw APIError.missingAPIKey }
-        guard let url = URL(string: "\(url_base)/chat/completions") else { throw APIError.invalidURL }
+        guard let url = URL(string: "\(url_base)\(proto.path)") else { throw APIError.invalidURL }
 
-        var messages: [[String: String]] = []
+        var messages: [[String: Any]] = []
         if !system.isEmpty { messages.append(["role": "system", "content": system]) }
         if !user.isEmpty   { messages.append(["role": "user",   "content": user]) }
         if messages.isEmpty { throw APIError.emptyInput }
 
-        var body: [String: Any] = [
-            "model": mdl,
-            "messages": messages,
-            "temperature": 0.3,
-            "stream": true,
-        ]
-        if !reasoningEffort.isEmpty {
-            body["reasoningEffort"] = reasoningEffort
-        }
+        let body = makeRequestBody(protocol: proto, model: mdl, messages: messages, stream: true, reasoningEffort: reasoningEffort)
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        let authHeader = "Bearer \(key)"
-        request.setValue(authHeader, forHTTPHeaderField: "Authorization")
+        setAuthHeaders(on: &request, key: key, protocol: proto)
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         request.timeoutInterval = 120
 
@@ -379,44 +402,89 @@ actor TextProcessingService {
                 throw APIError.httpError(httpResponse.statusCode, errorBody)
             }
 
-            return try await consumeSSEStream(bytes: bytes, onUpdate: onUpdate)
+            return try await consumeSSEStream(bytes: bytes, onUpdate: onUpdate, protocol: apiProtocol)
         } catch let error as URLError {
             throw APIError.fromURLError(error)
         }
     }
 
-    /// Shared SSE consumption for text + vision streaming.
-    private func consumeSSEStream(bytes: URLSession.AsyncBytes, onUpdate: StreamHandler?) async throws -> StreamResult {
+    /// Shared SSE consumption for all protocol streaming formats.
+    private func consumeSSEStream(bytes: URLSession.AsyncBytes, onUpdate: StreamHandler?, protocol proto: APIProtocol) async throws -> StreamResult {
         var result = StreamResult()
         var lastUpdateAt = Date.distantPast
         var hasPendingUpdate = false
+        var lastEvent: String?  // for event-based protocols (Anthropic Messages, OpenAI Responses)
 
         for try await line in bytes.lines {
             try Task.checkCancellation()
+
+            // Track event type for event-based protocols
+            if line.hasPrefix("event: ") {
+                lastEvent = String(line.dropFirst(7)).trimmingCharacters(in: .whitespaces)
+                continue
+            }
+
             guard line.hasPrefix("data: ") else { continue }
             let payload = String(line.dropFirst(6)).trimmingCharacters(in: .whitespaces)
             if payload == "[DONE]" { break }
+
             guard let data = payload.data(using: .utf8),
-                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let choices = json["choices"] as? [[String: Any]],
-                  let delta = choices.first?["delta"] as? [String: Any] else { continue }
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
 
             var updated = false
-            if let content = delta["content"] as? String, !content.isEmpty {
-                result.content += content
-                updated = true
+
+            switch proto {
+            case .chatCompletions:
+                guard let choices = json["choices"] as? [[String: Any]],
+                      let delta = choices.first?["delta"] as? [String: Any] else { continue }
+                if let content = delta["content"] as? String, !content.isEmpty {
+                    result.content += content
+                    updated = true
+                }
+                let reasoning = (delta["reasoning_content"] as? String)
+                    ?? (delta["reasoning"] as? String)
+                if let reasoning, !reasoning.isEmpty {
+                    result.thinking += reasoning
+                    updated = true
+                }
+
+            case .messages:
+                // Anthropic Messages API streaming
+                guard let type = json["type"] as? String else { continue }
+                switch type {
+                case "content_block_delta":
+                    if let delta = json["delta"] as? [String: Any],
+                       let text = delta["text"] as? String {
+                        result.content += text
+                        updated = true
+                    }
+                case "content_block_start":
+                    if let block = json["content_block"] as? [String: Any],
+                       let text = block["text"] as? String {
+                        result.content += text
+                        updated = true
+                    }
+                case "message_delta":
+                    if let delta = json["delta"] as? [String: Any],
+                       let stopReason = delta["stop_reason"] as? String {
+                        // End of generation — nothing to accumulate
+                    }
+                default:
+                    break
+                }
+
+            case .responses:
+                // OpenAI Responses API streaming
+                if let type = json["type"] as? String, type == "response.output_text.delta",
+                   let delta = json["delta"] as? String {
+                    result.content += delta
+                    updated = true
+                }
             }
-            let reasoning = (delta["reasoning_content"] as? String)
-                ?? (delta["reasoning"] as? String)
-            if let reasoning, !reasoning.isEmpty {
-                result.thinking += reasoning
-                updated = true
-            }
+
             if updated, let onUpdate {
                 hasPendingUpdate = true
                 let now = Date()
-                // Providers can emit dozens of tiny SSE chunks per second.
-                // Coalesce them to ~20 UI updates/sec to keep SwiftUI responsive.
                 if now.timeIntervalSince(lastUpdateAt) >= 0.05 {
                     let snapshot = result
                     await MainActor.run { onUpdate(snapshot) }
@@ -433,6 +501,107 @@ actor TextProcessingService {
             throw APIError.emptyResponse
         }
         return result
+    }
+
+    // MARK: - Request Body & Response Helpers
+
+    /// Build a protocol-specific request body.
+    private func makeRequestBody(
+        protocol proto: APIProtocol,
+        model mdl: String,
+        messages: [[String: Any]],
+        stream: Bool,
+        reasoningEffort: String
+    ) -> [String: Any] {
+        var body: [String: Any] = ["model": mdl]
+
+        switch proto {
+        case .chatCompletions:
+            body["messages"] = messages
+            body["temperature"] = 0.3
+            if stream { body["stream"] = true }
+            if !reasoningEffort.isEmpty { body["reasoningEffort"] = reasoningEffort }
+
+        case .responses:
+            // Responses API: instructions 顶层放系统提示, input 不含 system
+            let systemText = messages.compactMap { m -> String? in
+                guard let role = m["role"] as? String, role == "system",
+                      let content = m["content"] as? String else { return nil }
+                return content
+            }.first
+            if let systemText, !systemText.isEmpty {
+                body["instructions"] = systemText
+            }
+            var input = messages.filter { ($0["role"] as? String) != "system" }
+            // Responses API 要求 input 非空，纯 system 指令时补一条默认用户消息
+            if input.isEmpty {
+                input = [["role": "user", "content": "Please proceed."]]
+            }
+            body["input"] = input
+            body["temperature"] = 0.3
+            body["max_output_tokens"] = 4096
+            body["store"] = false
+            if stream { body["stream"] = true }
+            if !reasoningEffort.isEmpty { body["reasoningEffort"] = reasoningEffort }
+
+        case .messages:
+            // Anthropic: system is top-level; messages exclude system role
+            let systemText = messages.compactMap { m -> String? in
+                guard let role = m["role"] as? String, role == "system",
+                      let content = m["content"] as? String else { return nil }
+                return content
+            }.first
+            if let systemText, !systemText.isEmpty {
+                body["system"] = systemText
+            }
+            body["messages"] = messages.filter { ($0["role"] as? String) != "system" }
+            body["max_tokens"] = 4096  // required by Anthropic
+            if stream { body["stream"] = true }
+        }
+
+        return body
+    }
+
+    /// Set protocol-specific auth headers on the request.
+    private func setAuthHeaders(on request: inout URLRequest, key: String, protocol proto: APIProtocol) {
+        switch proto {
+        case .messages:
+            request.setValue(key, forHTTPHeaderField: "x-api-key")
+            request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+        default:
+            request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        }
+    }
+
+    /// Extract content from a non-streaming response for any protocol.
+    private func extractContent(from data: Data, protocol proto: APIProtocol) throws -> String {
+        switch proto {
+        case .chatCompletions:
+            let decoded = try JSONDecoder().decode(OpenAIChatResponse.self, from: data)
+            let content = decoded.choices.first?.message.content ?? ""
+            if content.isEmpty { throw APIError.emptyResponse }
+            return content
+
+        case .messages:
+            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let contentArray = json["content"] as? [[String: Any]],
+                  let text = contentArray.first(where: { $0["type"] as? String == "text" })?["text"] as? String,
+                  !text.isEmpty else {
+                throw APIError.emptyResponse
+            }
+            return text
+
+        case .responses:
+            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let output = json["output"] as? [[String: Any]],
+                  let firstOutput = output.first,
+                  let contentArray = firstOutput["content"] as? [[String: Any]],
+                  let text = contentArray.first?["text"] as? String,
+                  !text.isEmpty else {
+                throw APIError.emptyResponse
+            }
+            return text
+        }
     }
 
     // MARK: - Model Metadata

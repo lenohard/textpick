@@ -77,7 +77,8 @@ PopupWindowController (NSPanel, .floating level, .nonactivatingPanel)
               │
               ▼
         TextProcessingService
-          └── POST /v1/chat/completions → Vercel AI Gateway
+          └── POST /v1/{chat/completions|messages|responses} → API Gateway
+              (Protocol: Chat Completions / Messages / Responses)
 ```
 
 ## Configuration
@@ -89,6 +90,7 @@ Set in `.env` (copy `env.example`):
 | `AI_GATEWAY_API_KEY` | *(required)* | Vercel AI Gateway key |
 | `TEXTPICK_API_URL` | `https://ai-gateway.vercel.sh/v1` | Any OpenAI-compatible endpoint |
 | `TEXTPICK_MODEL` | `anthropic/claude-haiku-4.5` | Any Vercel AI Gateway model ID |
+| `TEXTPICK_API_PROTOCOL` | `chat-completions` | `chat-completions`, `messages` (Anthropic), or `responses` (OpenAI) |
 
 **Good model choices:**
 - `anthropic/claude-haiku-4.5` — default, fast & cheap

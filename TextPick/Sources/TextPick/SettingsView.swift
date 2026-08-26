@@ -522,6 +522,7 @@ struct APIAndModelTab: View {
     @AppStorage("textpick.visionModel") private var visionModel: String = ""
     @AppStorage("textpick.savedModels") private var savedModelsJSON: String = ""
     @AppStorage("textpick.reasoningEffort") private var reasoningEffort: String = ""
+    @AppStorage("textpick.apiProtocol") private var apiProtocol: String = "chat-completions"
 
     @State private var fetchedModels: [TextProcessingService.ModelInfo] = []
     @State private var isLoading = false
@@ -592,6 +593,8 @@ struct APIAndModelTab: View {
                                 }
                             }
                         }
+
+                        protocolPicker
 
                         HStack(spacing: 8) {
                             Button(action: runTestConnection) {
@@ -817,6 +820,38 @@ struct APIAndModelTab: View {
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
+        }
+    }
+
+    @ViewBuilder
+    private var protocolPicker: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("API Protocol").font(.system(size: 12, weight: .medium))
+            HStack(spacing: 8) {
+                Picker("Protocol", selection: $apiProtocol) {
+                    ForEach(TextProcessingService.APIProtocol.allCases, id: \.rawValue) { p in
+                        Text(p.displayName).tag(p.rawValue)
+                    }
+                }
+                .labelsHidden()
+                .fixedSize()
+                Spacer()
+                Text(protocolDescription)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(2)
+            }
+        }
+    }
+
+    private var protocolDescription: String {
+        switch apiProtocol {
+        case "messages":
+            return "Anthropic Messages API format. Requires \"max_tokens\" field."
+        case "responses":
+            return "OpenAI Responses API format."
+        default:
+            return "Standard OpenAI Chat Completions format."
         }
     }
 
