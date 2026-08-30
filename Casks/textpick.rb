@@ -1,6 +1,6 @@
 cask "textpick" do
   version "1.0.0"
-  sha256 "a3a85441285239c733a8ace0a359b91d51bd7bed9ab7fa24188b57c02d0a6403"
+  sha256 "b649cf5af6842c6f446437ec80b482427ec18e7614ae72726f5810dffc77118a"
 
   url "https://github.com/lenohard/textpick/releases/download/v#{version}/TextPick-#{version}.zip"
   name "TextPick"
