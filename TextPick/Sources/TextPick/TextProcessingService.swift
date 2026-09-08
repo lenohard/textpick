@@ -564,6 +564,7 @@ actor TextProcessingService {
 
     /// Set protocol-specific auth headers on the request.
     private func setAuthHeaders(on request: inout URLRequest, key: String, protocol proto: APIProtocol) {
+        request.setValue(UUID().uuidString, forHTTPHeaderField: "x-opencode-session")
         switch proto {
         case .messages:
             request.setValue(key, forHTTPHeaderField: "x-api-key")
@@ -713,6 +714,7 @@ actor TextProcessingService {
         }
         var request = URLRequest(url: url)
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue(UUID().uuidString, forHTTPHeaderField: "x-opencode-session")
         request.timeoutInterval = 10
         let (data, response) = try await urlSession.data(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
